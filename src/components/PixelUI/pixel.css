@@ -1,0 +1,358 @@
+/*
+ * Minecraft UI Stylesheet for VEDANT.EXE
+ * Adapted from zardoy/minecraft-web-client (MIT License - Copyright (c) 2020 PrismarineJS / zardoy)
+ */
+
+:root {
+  /* Authentic Minecraft Java Edition Color Palette */
+  --mc-white: #ffffff;
+  --mc-yellow: #ffff55;
+  --mc-gold: #ffaa00;
+  --mc-green: #55ff55;
+  --mc-red: #ff5555;
+  --mc-aqua: #55ffff;
+  --mc-gray: #aaaaaa;
+  --mc-dark-gray: #555555;
+  --mc-black: #000000;
+
+  /* UI Surface Colors */
+  --mc-bg-dirt: #2a1f18;
+  --mc-bg-overlay: rgba(0, 0, 0, 0.78);
+  --mc-panel-bg: rgba(22, 22, 22, 0.94);
+  --mc-panel-border-light: #555555;
+  --mc-panel-border-dark: #111111;
+
+  /* Button Tokens */
+  --mc-btn-bg: #727272;
+  --mc-btn-bg-hover: #8b8b8b;
+  --mc-btn-bg-active: #565656;
+  --mc-btn-bg-disabled: #444444;
+  --mc-btn-text-disabled: #a0a0a0;
+
+  /* Typography */
+  --mc-font: "Press Start 2P", minecraft, mojangles, monospace;
+}
+
+/* Base Pixel Reset */
+.pixel-ui-root {
+  font-family: var(--mc-font);
+  image-rendering: pixelated;
+  -webkit-font-smoothing: none;
+}
+
+/* =========================================
+   Pixel Button (Beveled 3D Style)
+   ========================================= */
+.pixel-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 16px;
+  font-family: var(--mc-font);
+  font-size: 11px;
+  font-weight: normal;
+  letter-spacing: 0.5px;
+  text-align: center;
+  text-decoration: none;
+  text-shadow: 2px 2px 0px #1a1a1a;
+  color: var(--mc-white);
+  background-color: var(--mc-btn-bg);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+
+  /* Authentic 2px Dual-Border */
+  border: 2px solid;
+  border-color: #8c8c8c #000000 #000000 #8c8c8c;
+
+  /* Inset Bevel Shadows with 0px blur */
+  box-shadow:
+    inset 2px 2px 0px rgba(255, 255, 255, 0.35),
+    inset -2px -2px 0px rgba(0, 0, 0, 0.5);
+
+  image-rendering: pixelated;
+  transition:
+    background-color 0.05s ease,
+    color 0.05s ease;
+}
+
+.pixel-btn:hover:not(:disabled),
+.pixel-btn:focus-visible:not(:disabled) {
+  background-color: var(--mc-btn-bg-hover);
+  color: var(--mc-yellow);
+  border-color: #a8a8a8 #111111 #111111 #a8a8a8;
+  box-shadow:
+    inset 2px 2px 0px rgba(255, 255, 255, 0.5),
+    inset -2px -2px 0px rgba(0, 0, 0, 0.6);
+}
+
+.pixel-btn:active:not(:disabled) {
+  background-color: var(--mc-btn-bg-active);
+  color: var(--mc-yellow);
+  border-color: #111111 #8c8c8c #8c8c8c #111111;
+  box-shadow:
+    inset 2px 2px 0px rgba(0, 0, 0, 0.6),
+    inset -2px -2px 0px rgba(255, 255, 255, 0.2);
+  transform: translateY(2px);
+}
+
+.pixel-btn:disabled {
+  background-color: var(--mc-btn-bg-disabled);
+  color: var(--mc-btn-text-disabled);
+  text-shadow: 1px 1px 0px #111111;
+  border-color: #555555 #222222 #222222 #555555;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+/* Button Variants */
+.pixel-btn--full {
+  width: 100%;
+}
+
+.pixel-btn--compact {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 9px;
+}
+
+.pixel-btn--primary {
+  border-color: #438258 #0b2214 #0b2214 #438258;
+  background-color: #2b5639;
+}
+
+.pixel-btn--primary:hover:not(:disabled) {
+  background-color: #386f4a;
+}
+
+/* =========================================
+   Pixel Panel & Screen Containers
+   ========================================= */
+.pixel-panel {
+  position: relative;
+  box-sizing: border-box;
+  background-color: var(--mc-panel-bg);
+  border: 3px solid var(--mc-panel-border-light);
+  outline: 2px solid var(--mc-black);
+  box-shadow:
+    inset 2px 2px 0px rgba(255, 255, 255, 0.1),
+    inset -2px -2px 0px rgba(0, 0, 0, 0.7),
+    0px 4px 16px rgba(0, 0, 0, 0.8);
+  padding: 24px;
+  color: var(--mc-white);
+  image-rendering: pixelated;
+}
+
+.pixel-panel--dirt {
+  background-color: var(--mc-bg-dirt);
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.15) 0px,
+      rgba(0, 0, 0, 0.15) 4px,
+      transparent 4px,
+      transparent 8px
+    ),
+    radial-gradient(circle, #38271e 0%, #1c130d 100%);
+  background-size:
+    16px 16px,
+    100% 100%;
+}
+
+.pixel-panel__header {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.pixel-panel__title {
+  margin: 0;
+  font-family: var(--mc-font);
+  font-size: 15px;
+  color: var(--mc-white);
+  text-shadow: 2px 2px 0px #1e1e1e;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.pixel-panel__subtitle {
+  margin: 8px 0 0 0;
+  font-family: var(--mc-font);
+  font-size: 10px;
+  color: var(--mc-gray);
+  text-shadow: 1px 1px 0px #111111;
+  line-height: 1.6;
+}
+
+/* Fullscreen Overlay Backdrop */
+.pixel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--mc-bg-overlay);
+  backdrop-filter: blur(2px);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+/* =========================================
+   Pixel Input Field
+   ========================================= */
+.pixel-input-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+.pixel-input-wrapper__label {
+  font-family: var(--mc-font);
+  font-size: 9px;
+  color: var(--mc-gray);
+  text-shadow: 1px 1px 0px #000;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pixel-input-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  background-color: var(--mc-black);
+  border: 2px solid var(--mc-dark-gray);
+  box-sizing: border-box;
+  padding: 0 10px;
+  transition: border-color 0.1s ease;
+}
+
+.pixel-input-box:hover,
+.pixel-input-box:focus-within {
+  border-color: var(--mc-white);
+}
+
+.pixel-input-box--error {
+  border-color: var(--mc-red) !important;
+}
+
+.pixel-input {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--mc-font);
+  font-size: 11px;
+  color: var(--mc-white);
+  text-shadow: 1px 1px 0px #222222;
+  box-sizing: border-box;
+}
+
+.pixel-input::placeholder {
+  color: #666666;
+}
+
+/* =========================================
+   Pixel Badges & Indicators
+   ========================================= */
+.pixel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: rgba(0, 0, 0, 0.65);
+  border: 1px solid var(--mc-dark-gray);
+  font-family: var(--mc-font);
+  font-size: 8px;
+  color: var(--mc-white);
+  text-shadow: 1px 1px 0px #000000;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+
+.pixel-badge__dot {
+  width: 6px;
+  height: 6px;
+  background-color: currentColor;
+  box-shadow: 0 0 4px currentColor;
+}
+
+.pixel-badge--green {
+  color: var(--mc-green);
+  border-color: rgba(85, 255, 85, 0.4);
+}
+
+.pixel-badge--yellow {
+  color: var(--mc-yellow);
+  border-color: rgba(255, 255, 85, 0.4);
+}
+
+.pixel-badge--gold {
+  color: var(--mc-gold);
+  border-color: rgba(255, 170, 0, 0.4);
+}
+
+.pixel-badge--aqua {
+  color: var(--mc-aqua);
+  border-color: rgba(85, 255, 255, 0.4);
+}
+
+.pixel-badge--red {
+  color: var(--mc-red);
+  border-color: rgba(255, 85, 85, 0.4);
+}
+
+/* =========================================
+   Splash Text Animation
+   ========================================= */
+.pixel-splash {
+  font-family: var(--mc-font);
+  font-size: 13px;
+  color: var(--mc-yellow);
+  text-shadow: 2px 2px 0px #3f3f3f;
+  animation: pixel-splash-pulse 1.2s infinite alternate ease-in-out;
+  display: inline-block;
+  transform-origin: center;
+}
+
+@keyframes pixel-splash-pulse {
+  0% {
+    transform: scale(0.95) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1.08) rotate(-3deg);
+  }
+}
+
+/* =========================================
+   Minecraft Dirt Screen Background
+   ========================================= */
+.mc-dirt-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #241810;
+  background-image:
+    radial-gradient(circle at center, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.88) 100%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%233a271c'/%3E%3Crect x='0' y='0' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='8' y='0' width='4' height='4' fill='%234a3325'/%3E%3Crect x='12' y='4' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='4' y='8' width='4' height='4' fill='%234a3325'/%3E%3Crect x='0' y='12' width='4' height='4' fill='%23241810'/%3E%3Crect x='8' y='12' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='4' y='4' width='2' height='2' fill='%23573c2c'/%3E%3Crect x='10' y='8' width='2' height='2' fill='%23573c2c'/%3E%3Crect x='2' y='10' width='2' height='2' fill='%231d130d'/%3E%3Crect x='14' y='14' width='2' height='2' fill='%231d130d'/%3E%3C/svg%3E");
+  background-size:
+    100% 100%,
+    32px 32px;
+  background-repeat: no-repeat, repeat;
+  image-rendering: pixelated;
+  user-select: none;
+  cursor: wait;
+}

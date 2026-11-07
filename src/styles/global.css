@@ -1,95 +1,27 @@
-@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@400;500;600;700;800&display=swap");
-
 :root {
-  font-family: "Inter", sans-serif;
-  color: #e8e4d9;
-  background: #17231d;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
   --color-forest: #17231d;
   --color-sage: #c8d6b9;
   --color-parchment: #e8e4d9;
   --color-wood: #9c754d;
-
-  --font-pixel: "Press Start 2P", monospace;
-  --font-body: "Inter", sans-serif;
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 html,
 body,
 #root {
   width: 100%;
-  min-width: 320px;
-  min-height: 100%;
-  margin: 0;
-}
-
-body {
-  min-height: 100vh;
+  height: 100%;
   overflow: hidden;
-}
-
-button,
-a {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-::selection {
-  color: var(--color-forest);
-  background: var(--color-sage);
-}
-.portfolio {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 24px;
-}
-
-.portfolio__intro {
-  width: min(100%, 800px);
-  text-align: center;
-}
-
-.portfolio__eyebrow {
-  color: var(--color-sage);
-  font-family: var(--font-pixel);
-  font-size: 10px;
-  letter-spacing: 2px;
-}
-
-.portfolio__intro h1 {
-  margin: 32px 0;
-  font-family: var(--font-pixel);
-  font-size: clamp(28px, 6vw, 64px);
-  line-height: 1.5;
-}
-
-.portfolio__description {
-  color: #c1c9be;
-  font-size: clamp(14px, 2vw, 18px);
-}
-
-.portfolio__status {
-  display: inline-block;
-  margin-top: 48px;
-  color: var(--color-wood);
-  font-family: var(--font-pixel);
-  font-size: 9px;
+  background-color: var(--color-forest);
+  color: var(--color-parchment);
 }
