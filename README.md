@@ -72,7 +72,7 @@ This project is actively under development. Features listed as planned are not n
 Clone the repository:
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone <https://github.com/VedantAdsul/Portfolio.git>
 ```
 
 Navigate into the project:
