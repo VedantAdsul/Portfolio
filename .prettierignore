@@ -2,3 +2,5 @@ node_modules
 dist
 coverage
 *.lock
+public/draco
+mc-assets-reference

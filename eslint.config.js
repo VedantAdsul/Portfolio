@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
 
 export default defineConfig([
-  globalIgnores(["dist", "minecraft-web-client-reference/**"]),
+  globalIgnores(["dist", "minecraft-web-client-reference/**", "mc-assets-reference/**"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [

@@ -27,6 +27,7 @@ function getSectionDescription(id: string): string {
 
 export function App() {
   const [isCanvasReady, setIsCanvasReady] = useState<boolean>(false);
+  const [isSceneReady, setIsSceneReady] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [showPreview, setShowPreview] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.location.search.includes("preview") : false
@@ -35,6 +36,7 @@ export function App() {
   // Synchronized with real DOM, font, WebGL, and Drei asset loading progress
   const { progress } = useActualAssetProgress({
     isCanvasReady,
+    isSceneReady,
     onComplete: () => setIsLoading(false),
   });
 
@@ -82,8 +84,11 @@ export function App() {
         backgroundColor: "var(--color-forest)",
       }}
     >
-      {/* Background Layer: 3D World Canvas (pointer-events: none) */}
-      <WorldCanvas onCreated={() => setIsCanvasReady(true)} />
+      {/* Background Layer: 3D World Canvas */}
+      <WorldCanvas
+        onCreated={() => setIsCanvasReady(true)}
+        onSceneReady={() => setIsSceneReady(true)}
+      />
 
       {/* UI Layer: Permanent Brand Header */}
       <header
@@ -130,7 +135,8 @@ export function App() {
       >
         <div
           style={{
-            pointerEvents: "auto",
+            pointerEvents: "none",
+            userSelect: "none",
             maxWidth: "640px",
           }}
         >
