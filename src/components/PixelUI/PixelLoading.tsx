@@ -49,18 +49,19 @@ export interface MinecraftSquareLoaderProps {
 }
 
 /**
- * MinecraftSquareLoader - Authentic Minecraft Java Edition World-Generation Loader
+ * MinecraftSquareLoader - Authentic Minecraft Java Edition Chunk-Generation Loader
  *
- * Discrete block-by-block progression:
- * - Dark/black: not started (#141414)
- * - Dark grey: pending (#555555)
- * - Light grey/white: processing (#ffffff)
- * - Green: completed (#55ff55)
- * Hard pixel edges, no transitions, instantaneous color-state changes.
+ * Recreates the exact multi-stage radial chunk generation shown in Java Edition:
+ * 1. At 0%: The inner loading box is 100% solid black.
+ * 2. As generation starts: Everything begins in the middle as small nested squares
+ *    (White core -> Green foliage border -> Blue water border -> Grey terrain layer).
+ * 3. The squares expand from the inside outward, slowly filling and replacing the black square.
+ * 4. At 100%: The grey terrain expands fully to the outer outline, the blue and green
+ *    borders reach their final frame positions, and the white core completes.
  */
 export const MinecraftSquareLoader: React.FC<MinecraftSquareLoaderProps> = ({
   progress,
-  size = 132,
+  size = 180,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const clampedProgress = Math.max(0, Math.min(100, Math.round(progress)));
@@ -74,69 +75,98 @@ export const MinecraftSquareLoader: React.FC<MinecraftSquareLoaderProps> = ({
 
     ctx.imageSmoothingEnabled = false;
 
-    // Grid resolution: 22 x 22 discrete blocks
-    const GRID_SIZE = 22;
-    const blockSize = Math.floor(size / GRID_SIZE);
-    const canvasPixelWidth = blockSize * GRID_SIZE;
-    const center = (GRID_SIZE - 1) / 2;
-    const maxRadius = center + 0.5;
+    const S = size;
+    const center = S / 2;
+    const OUTLINE = 3;
+    const maxRadius = Math.floor((S - 2 * OUTLINE) / 2); // 87px
 
-    // Discrete expansion radius
-    const currentRadius = (clampedProgress / 100) * maxRadius;
+    // Outer 3px dark black border
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, S, S);
 
-    // Minecraft Java Edition Color States
-    const COLOR_NOT_STARTED = "#141414"; // Dark / black
-    const COLOR_PENDING = "#555555"; // Dark grey
-    const COLOR_PROCESSING = "#ffffff"; // Light grey / white
-    const COLOR_COMPLETED = "#55ff55"; // Green
+    // If 0%: The interior is 100% solid black
+    if (clampedProgress === 0) {
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(OUTLINE, OUTLINE, S - 2 * OUTLINE, S - 2 * OUTLINE);
+      return;
+    }
 
-    // Clear background
-    ctx.fillStyle = COLOR_NOT_STARTED;
-    ctx.fillRect(0, 0, canvasPixelWidth, canvasPixelWidth);
+    // Normalized progress p in [0, 1]
+    const p = clampedProgress / 100;
+    // Radial growth is area-proportional (sqrt) matching 2D chunk distribution
+    const growth = Math.sqrt(p);
 
-    for (let y = 0; y < GRID_SIZE; y++) {
-      for (let x = 0; x < GRID_SIZE; x++) {
-        const dx = Math.abs(x - center);
-        const dy = Math.abs(y - center);
-        const chebyshev = Math.max(dx, dy);
+    // Discrete pixel stepping (2px integer blocks for snappy pixelated feel)
+    const step = 2;
 
-        let color: string;
+    // 1. Grey terrain/stone radius: expands outward to fill the black box
+    // Reaches the outer boundary around p = 0.85
+    const rGreyTarget = Math.min(
+      maxRadius,
+      Math.round(Math.min(1.0, growth * 1.15) * maxRadius)
+    );
+    const rGrey = Math.floor(rGreyTarget / step) * step;
 
-        if (clampedProgress === 0) {
-          color = chebyshev <= 2 ? COLOR_PENDING : COLOR_NOT_STARTED;
-        } else if (clampedProgress >= 100) {
-          color = chebyshev >= center - 0.75 ? COLOR_COMPLETED : COLOR_PROCESSING;
-        } else if (chebyshev < currentRadius - 0.75) {
-          // Core processing area
-          color = COLOR_PROCESSING;
-        } else if (chebyshev <= currentRadius) {
-          // Active completed boundary
-          color = COLOR_COMPLETED;
-        } else if (chebyshev <= currentRadius + 2) {
-          // Pending generation queue
-          color = COLOR_PENDING;
-        } else {
-          // Not started
-          color = COLOR_NOT_STARTED;
-        }
+    // 2. Blue water border outer radius
+    const maxBlueRadius = Math.round(maxRadius * 0.7); // ~61px
+    const rBlueTarget = Math.min(rGrey, Math.round(growth * maxBlueRadius));
+    const rBlue = Math.floor(rBlueTarget / step) * step;
 
-        ctx.fillStyle = color;
-        ctx.fillRect(x * blockSize, y * blockSize, blockSize, blockSize);
-      }
+    // 3. Green vegetation border outer radius (3px inside blue)
+    const rGreenTarget = Math.min(rBlue, Math.max(0, rBlue - 3));
+    const rGreen = Math.floor(rGreenTarget / step) * step;
+
+    // 4. White finalized core radius (3px inside green)
+    const rWhiteTarget = Math.min(rGreen, Math.max(0, rGreen - 3));
+    const rWhite = Math.floor(rWhiteTarget / step) * step;
+
+    // Fill inner box background with black (unloaded world void)
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(OUTLINE, OUTLINE, S - 2 * OUTLINE, S - 2 * OUTLINE);
+
+    // Draw concentric squares from outside in (Chebyshev distance):
+    // Layer 1: Grey stone & terrain layer (expands from center, replacing black)
+    if (rGrey > 0) {
+      ctx.fillStyle = "#9a9a9a";
+      const x = Math.round(center - rGrey);
+      const y = Math.round(center - rGrey);
+      const w = Math.round(rGrey * 2);
+      ctx.fillRect(x, y, w, w);
+    }
+
+    // Layer 2: Blue water border square
+    if (rBlue > 0) {
+      ctx.fillStyle = "#1e4db8";
+      const x = Math.round(center - rBlue);
+      const y = Math.round(center - rBlue);
+      const w = Math.round(rBlue * 2);
+      ctx.fillRect(x, y, w, w);
+    }
+
+    // Layer 3: Green vegetation border square
+    if (rGreen > 0) {
+      ctx.fillStyle = "#22c55e";
+      const x = Math.round(center - rGreen);
+      const y = Math.round(center - rGreen);
+      const w = Math.round(rGreen * 2);
+      ctx.fillRect(x, y, w, w);
+    }
+
+    // Layer 4: White finalized core
+    if (rWhite > 0) {
+      ctx.fillStyle = "#ffffff";
+      const x = Math.round(center - rWhite);
+      const y = Math.round(center - rWhite);
+      const w = Math.round(rWhite * 2);
+      ctx.fillRect(x, y, w, w);
     }
   }, [clampedProgress, size]);
-
-  const GRID_SIZE = 22;
-  const blockSize = Math.floor(size / GRID_SIZE);
-  const actualSize = blockSize * GRID_SIZE;
 
   return (
     <div
       style={{
-        width: actualSize,
-        height: actualSize,
-        border: "3px solid #000000",
-        backgroundColor: "#141414",
+        width: size,
+        height: size,
         boxSizing: "content-box",
         imageRendering: "pixelated",
         display: "block",
@@ -144,11 +174,11 @@ export const MinecraftSquareLoader: React.FC<MinecraftSquareLoaderProps> = ({
     >
       <canvas
         ref={canvasRef}
-        width={actualSize}
-        height={actualSize}
+        width={size}
+        height={size}
         style={{
-          width: actualSize,
-          height: actualSize,
+          width: size,
+          height: size,
           display: "block",
           imageRendering: "pixelated",
         }}

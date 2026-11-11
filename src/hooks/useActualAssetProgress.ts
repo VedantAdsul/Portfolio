@@ -21,22 +21,28 @@ export interface UseActualAssetProgressOptions {
   onComplete?: () => void;
 }
 
+export interface UseActualAssetProgressResult {
+  progress: number;
+  statusText: string;
+  error: string | null;
+}
+
 export function useActualAssetProgress({
   isCanvasReady = false,
   isSceneReady = false,
   onComplete,
-}: UseActualAssetProgressOptions = {}) {
+}: UseActualAssetProgressOptions = {}): UseActualAssetProgressResult {
   const [fontsLoaded, setFontsLoaded] = useState<boolean>(false);
   const hasCompletedRef = useRef<boolean>(false);
   const onCompleteRef = useRef(onComplete);
-  const { progress: dreiProgress, total, active } = useProgress();
+  const { progress: dreiProgress, total, active, errors } = useProgress();
 
   // Keep onComplete ref up-to-date without triggering effect resets
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
-  // Track font readiness
+  // Track font readiness (Mojangles, Minecraftia, Press Start 2P)
   useEffect(() => {
     if (typeof document !== "undefined" && document.fonts) {
       void document.fonts.ready.then(() => {
@@ -86,6 +92,20 @@ export function useActualAssetProgress({
     computedProgress = Math.min(computedProgress, 95);
   }
 
+  // Determine authentic Minecraft-style loading status description reflecting actual stages
+  let statusText = "Generating terrain...";
+  if (computedProgress >= 100) {
+    statusText = "World ready.";
+  } else if (computedProgress >= 90) {
+    statusText = "Preparing the world...";
+  } else if (computedProgress >= 75) {
+    statusText = "Filling waterways...";
+  } else if (computedProgress >= 50) {
+    statusText = "Growing vegetation...";
+  } else if (computedProgress >= 25) {
+    statusText = "Loading stone structures...";
+  }
+
   // Handle completion transition once 100% is reached
   useEffect(() => {
     if (computedProgress >= 100 && !hasCompletedRef.current) {
@@ -97,7 +117,13 @@ export function useActualAssetProgress({
     }
   }, [computedProgress]);
 
-  return { progress: computedProgress };
+  const activeError = errors && errors.length > 0 ? errors[0] : null;
+
+  return {
+    progress: computedProgress,
+    statusText,
+    error: activeError,
+  };
 }
 
 export default useActualAssetProgress;

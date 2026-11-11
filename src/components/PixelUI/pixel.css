@@ -3,6 +3,22 @@
  * Adapted from zardoy/minecraft-web-client (MIT License - Copyright (c) 2020 PrismarineJS / zardoy)
  */
 
+@font-face {
+  font-family: "Mojangles";
+  src: url("/fonts/mojangles.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Minecraftia";
+  src: url("/fonts/minecraftia.woff") format("woff");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* Authentic Minecraft Java Edition Color Palette */
   --mc-white: #ffffff;
@@ -29,8 +45,8 @@
   --mc-btn-bg-disabled: #444444;
   --mc-btn-text-disabled: #a0a0a0;
 
-  /* Typography */
-  --mc-font: "Press Start 2P", minecraft, mojangles, monospace;
+  /* Typography: Authentic Minecraft font with system fallback */
+  --mc-font: "Mojangles", "Minecraftia", "Press Start 2P", minecraft, monospace;
 }
 
 /* Base Pixel Reset */
@@ -344,15 +360,17 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background-color: #241810;
+  background-color: #1a110b;
   background-image:
-    radial-gradient(circle at center, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.88) 100%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%233a271c'/%3E%3Crect x='0' y='0' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='8' y='0' width='4' height='4' fill='%234a3325'/%3E%3Crect x='12' y='4' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='4' y='8' width='4' height='4' fill='%234a3325'/%3E%3Crect x='0' y='12' width='4' height='4' fill='%23241810'/%3E%3Crect x='8' y='12' width='4' height='4' fill='%232b1d14'/%3E%3Crect x='4' y='4' width='2' height='2' fill='%23573c2c'/%3E%3Crect x='10' y='8' width='2' height='2' fill='%23573c2c'/%3E%3Crect x='2' y='10' width='2' height='2' fill='%231d130d'/%3E%3Crect x='14' y='14' width='2' height='2' fill='%231d130d'/%3E%3C/svg%3E");
+    linear-gradient(rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.76)),
+    url("/assets/textures/dirt.png");
   background-size:
-    100% 100%,
-    32px 32px;
-  background-repeat: no-repeat, repeat;
+    auto,
+    64px 64px;
+  background-repeat: repeat;
   image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
   user-select: none;
   cursor: wait;
 }
