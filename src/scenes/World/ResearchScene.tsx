@@ -79,6 +79,44 @@ export function ResearchScene({ visible = false, onLoaded }: ResearchSceneProps)
                 mat.depthWrite = true;
                 mat.emissive = new THREE.Color(0x3a8e9e);
                 mat.emissiveIntensity = 0.35;
+              } else if (/iron_block/i.test(matName)) {
+                // Correct iron block material in isolation:
+                // Blender glTF exported iron_block with default metallicFactor = 1.0 and specularFactor = 0,
+                // which completely absorbs diffuse light and makes the block appear abnormally dark.
+                // Reset metalness to 0.0 and roughness to 0.55 so the authentic light-gray Minecraft texture
+                // scatters standard diffuse light identically to the rest of the voxel world.
+                mat.transparent = false;
+                mat.depthWrite = true;
+                mat.metalness = 0.0;
+                mat.roughness = 0.55;
+                if ("specularIntensity" in mat) {
+                  (mat as unknown as { specularIntensity: number }).specularIntensity =
+                    0.4;
+                }
+                if ("specularColor" in mat) {
+                  (mat as unknown as { specularColor: THREE.Color }).specularColor.setHex(
+                    0xffffff
+                  );
+                }
+              } else if (/iron_block/i.test(matName)) {
+                // Correct iron block material in isolation:
+                // Blender glTF exported iron_block with default metallicFactor = 1.0 and specularFactor = 0,
+                // which completely absorbs diffuse light and makes the block appear abnormally dark.
+                // Reset metalness to 0.0 and roughness to 0.55 so the authentic light-gray Minecraft texture
+                // scatters standard diffuse light identically to the rest of the voxel world.
+                mat.transparent = false;
+                mat.depthWrite = true;
+                mat.metalness = 0.0;
+                mat.roughness = 0.55;
+                if ("specularIntensity" in mat) {
+                  (mat as unknown as { specularIntensity: number }).specularIntensity =
+                    0.4;
+                }
+                if ("specularColor" in mat) {
+                  (mat as unknown as { specularColor: THREE.Color }).specularColor.setHex(
+                    0xffffff
+                  );
+                }
               } else if (isTranslucentMesh || TRANSLUCENT_MATERIAL_REGEX.test(matName)) {
                 mat.transparent = true;
                 mat.opacity = mat.opacity < 1 ? mat.opacity : 0.85;

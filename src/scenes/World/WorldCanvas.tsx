@@ -42,7 +42,8 @@ export interface WorldCanvasProps {
   isMarsVisible?: boolean;
   onMarsVisibilityChange?: (visible: boolean) => void;
   onTeleportToMars?: () => void;
-  onAtMarsRestingChange?: (atResting: boolean) => void;
+  onTeleportToHub?: () => void;
+  onAtMarsRestingChange?: (atResting: boolean, restingIndex?: number) => void;
 }
 
 interface SceneErrorBoundaryProps {
@@ -113,6 +114,7 @@ export function WorldCanvas({
   isWormholeVisible = true,
   isMarsVisible = false,
   onTeleportToMars,
+  onTeleportToHub,
   onAtMarsRestingChange,
 }: WorldCanvasProps) {
   const [marsPathAlignment, setMarsPathAlignment] = useState<{
@@ -179,6 +181,7 @@ export function WorldCanvas({
               onNavigateSection={onNavigateSection}
               onMarsPathReady={setMarsPathAlignment}
               onTeleportToMars={onTeleportToMars}
+              onTeleportToHub={onTeleportToHub}
               onAtMarsRestingChange={onAtMarsRestingChange}
             />
             <SceneReadyWatcher onReady={onSceneReady} />

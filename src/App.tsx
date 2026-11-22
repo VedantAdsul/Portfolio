@@ -44,6 +44,13 @@ export function App() {
     setIsHubVisible(false);
   }, []);
 
+  const handleTeleportToHub = useCallback(() => {
+    setIsMarsVisible(false);
+    setIsVillageVisible(true);
+    setIsHubVisible(true);
+    setIsAtMarsResting(false);
+  }, []);
+
   // Synchronized with real DOM, font, WebGL, Drei assets, and 3D first-frame render
   const {
     progress,
@@ -83,18 +90,13 @@ export function App() {
         onScrollDownAtHub={nextSection}
         activeSection={activeSection.id}
         onNavigateSection={(sectionId) => {
-          if (sectionId === "home" && isMarsVisible) {
-            setIsMarsVisible(false);
-            setIsVillageVisible(true);
-            setIsHubVisible(true);
-            setIsAtMarsResting(false);
-          }
           goToSection(sectionId);
         }}
         isWormholeVisible={isWormholeVisible}
         isMarsVisible={isMarsVisible}
         onMarsVisibilityChange={setIsMarsVisible}
         onTeleportToMars={handleTeleportToMars}
+        onTeleportToHub={handleTeleportToHub}
         onAtMarsRestingChange={setIsAtMarsResting}
         enableOrbitControls={false}
       />
@@ -141,6 +143,38 @@ export function App() {
         onViewResearch={() => goToSection("research")}
       />
 
+      {/* Minecraft-style Return to Hub Action when in Mars Environment */}
+      {isMarsVisible && !isLoading && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "36px",
+            left: "36px",
+            zIndex: 45,
+            pointerEvents: "auto",
+            animation: "returnHubFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+          }}
+        >
+          <button
+            type="button"
+            className="pixel-btn"
+            onClick={() => goToSection("home")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "10px",
+              padding: "10px 18px",
+              fontSize: "11px",
+              letterSpacing: "1px",
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ fontSize: "13px" }}>◀</span>
+            <span>RETURN TO HUB</span>
+          </button>
+        </div>
+      )}
+
       {/* Minecraft Java Edition World Generation Loading Screen */}
       {isLoading && (
         <LoadingScreen
@@ -153,6 +187,19 @@ export function App() {
           }}
         />
       )}
+
+      <style>{`
+        @keyframes returnHubFadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(16px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
     </div>
   );
 }

@@ -2,32 +2,24 @@
  * CameraRig Component
  *
  * Implements the guided cinematic camera journey for VEDANT.EXE connecting
- * the Mountain peak origin through the Village to the Central Hub destination.
+ * the Mountain peak origin through the Village to the Central Hub destination,
+ * and onward through the 5th Dimension Wormhole to the Mars Research Station.
  *
  * Traversal Journey:
- * Mountain Peak (u=1.0, progress=0.0) -> Village -> Docks ->
- * Boat Visibility marker (crossing triggers Hub visibility) ->
- * Hub Resting marker (u=0.0, progress=1.0) -> Looks toward Camera Pointer.
- *
- * Features:
- * 1. Autonomous continuous forward movement at default cinematic speed (~55s).
- * 2. Full bidirectional scroll velocity control:
- *    - Scroll DOWN: Accelerates forward movement smoothly up to max forward speed.
- *    - Scroll UP: Reverses movement backwards along the exact same path while
- *      maintaining the forward-facing orientation along the path.
- *    - Scroll RELEASE: Smoothly decelerates back to autonomous forward movement via GSAP.
- * 3. Blender Marker Integration:
- *    - Reads named Empty objects (`Boat Visibility`, `Hub Resting`, `Camera Pointer`, `Next Area`)
- *      directly from `camera_path.glb`.
- *    - Triggers Hub visibility when crossing `Boat Visibility`.
- *    - Smoothly settles and pauses autonomous movement at `Hub Resting`.
- *    - Smoothly blends orientation to look toward `Camera Pointer` without snapping.
- * 4. Section Navigation:
- *    - Scrolling down at `Hub Resting` triggers transition toward the next area.
- *    - Scrolling up returns to `Hub Resting`.
- *    - Unified transition system for navigation buttons and wheel events with debouncing.
- * 5. Horizontal mouse look interaction (~30 degrees max yaw rotation)
- *    with smooth damping, roll prevention, and automatic recentering.
+ * 1. Mountain Peak (u=1.0, progress=0.0) -> Village -> Docks ->
+ *    Boat Visibility marker (crossing triggers Hub visibility) ->
+ *    Hub Resting marker (u=0.0, progress=1.0) -> Looks toward Camera Pointer.
+ * 2. Departure: Hub Resting -> Hallway -> Wormhole -> Event Horizon Plunge ->
+ *    Concealed Teleportation in pitch-black singularity core ->
+ *    Emergence from destination wormhole onto Mars Camera Path ->
+ *    Mars Station Resting Point 1.
+ * 3. Mars Multi-Point Navigation:
+ *    - Forward: Resting 1 (u=0.5692) -> Resting 2 (u=0.8194) -> Resting 3 (u=1.0).
+ *    - Reverse: Resting 3 -> Resting 2 -> Resting 1.
+ *      Significantly faster cinematic rewind with zero 180-degree rotation.
+ *      Camera strictly maintains forward viewing orientation along the path.
+ *    - Return to Hub: Intentional Minecraft-style button action triggering reverse
+ *      wormhole transition concealed inside the black singularity core.
  */
 
 import { useEffect, useMemo, useRef } from "react";
@@ -61,8 +53,23 @@ const FALLBACK_NEXT_AREA = new THREE.Vector3(-383.8439, 24.4108, -23.0299);
 const FALLBACK_WORMHOLE_ENTRY = new THREE.Vector3(-385.9731, 26.8341, -22.6255);
 const FALLBACK_WORMHOLE_EXIT = new THREE.Vector3(-430.0504, 26.9651, -23.8131);
 const FALLBACK_MARS_STATION_ENTRY = new THREE.Vector3(-537.0149, 171.031, -21.4217);
-const FALLBACK_MARS_STATION_RESTING = new THREE.Vector3(-557.5784, 165.6332, -21.6792);
-const FALLBACK_MARS_CAMERA_POINTER = new THREE.Vector3(-632.1886, 180.7053, -10.4269);
+
+// Mars Resting Points and Look Target Pointers from Blender
+const FALLBACK_MARS_STATION_RESTING_1 = new THREE.Vector3(-598.8008, 151.6248, -26.4746);
+const FALLBACK_MARS_STATION_RESTING_2 = new THREE.Vector3(-617.8926, 165.2556, -46.6581);
+const FALLBACK_MARS_STATION_RESTING_3 = new THREE.Vector3(-639.4886, 162.6155, -37.6995);
+
+const FALLBACK_MARS_CAMERA_POINTER_1 = new THREE.Vector3(-632.1886, 180.7053, -10.4269);
+const FALLBACK_MARS_CAMERA_POINTER_2 = new THREE.Vector3(-612.4886, 193.6155, -103.6995);
+const FALLBACK_MARS_CAMERA_POINTER_3 = new THREE.Vector3(-624.1622, 177.3324, -2.474);
+
+// Mars Camera Path U parameter values for each resting point
+const MARS_RESTING_U = {
+  EXIT: 0.0,
+  RESTING_1: 0.5692,
+  RESTING_2: 0.8194,
+  RESTING_3: 1.0,
+};
 
 export interface BlenderMarkers {
   boatVisibility: THREE.Vector3;
@@ -72,8 +79,12 @@ export interface BlenderMarkers {
   wormholeEntry: THREE.Vector3;
   wormholeExit: THREE.Vector3;
   marsStationEntry: THREE.Vector3;
-  marsStationResting: THREE.Vector3;
-  marsCameraPointer: THREE.Vector3;
+  marsStationResting1: THREE.Vector3;
+  marsStationResting2: THREE.Vector3;
+  marsStationResting3: THREE.Vector3;
+  marsCameraPointer1: THREE.Vector3;
+  marsCameraPointer2: THREE.Vector3;
+  marsCameraPointer3: THREE.Vector3;
   found: {
     boatVisibility: boolean;
     hubResting: boolean;
@@ -82,8 +93,12 @@ export interface BlenderMarkers {
     wormholeEntry: boolean;
     wormholeExit: boolean;
     marsStationEntry: boolean;
-    marsStationResting: boolean;
-    marsCameraPointer: boolean;
+    marsStationResting1: boolean;
+    marsStationResting2: boolean;
+    marsStationResting3: boolean;
+    marsCameraPointer1: boolean;
+    marsCameraPointer2: boolean;
+    marsCameraPointer3: boolean;
   };
 }
 
@@ -110,8 +125,10 @@ export interface CameraRigProps {
   onMarsPathReady?: (info: { start: THREE.Vector3; tangent: THREE.Vector3 }) => void;
   /** Called when the camera enters the wormhole throat and teleports to Mars */
   onTeleportToMars?: () => void;
-  /** Called when the camera arrives at the first Mars resting point */
-  onAtMarsRestingChange?: (atResting: boolean) => void;
+  /** Called when the camera teleports back from Mars to Hub */
+  onTeleportToHub?: () => void;
+  /** Called when the camera arrives at or leaves a Mars resting point */
+  onAtMarsRestingChange?: (atResting: boolean, restingIndex?: number) => void;
   /** Diagnostic callback reporting whether markers and raw geometry were present */
   onDiagnostic?: (diagnostic: {
     hasVertices: boolean;
@@ -126,8 +143,12 @@ export interface CameraRigProps {
       wormholeEntry?: boolean;
       wormholeExit?: boolean;
       marsStationEntry?: boolean;
-      marsStationResting?: boolean;
-      marsCameraPointer?: boolean;
+      marsStationResting1?: boolean;
+      marsStationResting2?: boolean;
+      marsStationResting3?: boolean;
+      marsCameraPointer1?: boolean;
+      marsCameraPointer2?: boolean;
+      marsCameraPointer3?: boolean;
     };
   }) => void;
 }
@@ -146,8 +167,12 @@ function extractMarkers(
   let wormholeEntry: THREE.Vector3 | null = null;
   let wormholeExit: THREE.Vector3 | null = null;
   let marsStationEntry: THREE.Vector3 | null = null;
-  let marsStationResting: THREE.Vector3 | null = null;
-  let marsCameraPointer: THREE.Vector3 | null = null;
+  let marsStationResting1: THREE.Vector3 | null = null;
+  let marsStationResting2: THREE.Vector3 | null = null;
+  let marsStationResting3: THREE.Vector3 | null = null;
+  let marsCameraPointer1: THREE.Vector3 | null = null;
+  let marsCameraPointer2: THREE.Vector3 | null = null;
+  let marsCameraPointer3: THREE.Vector3 | null = null;
 
   villageScene.updateMatrixWorld(true);
 
@@ -181,12 +206,48 @@ function extractMarkers(
       if (cleanName.includes("wormhole exit") || cleanName.includes("station entry")) {
         marsStationEntry = new THREE.Vector3();
         child.getWorldPosition(marsStationEntry);
-      } else if (cleanName.includes("station resting")) {
-        marsStationResting = new THREE.Vector3();
-        child.getWorldPosition(marsStationResting);
-      } else if (cleanName.includes("camera pointer")) {
-        marsCameraPointer = new THREE.Vector3();
-        child.getWorldPosition(marsCameraPointer);
+      } else if (
+        cleanName.includes("station resting 1") ||
+        cleanName.includes("resting 1") ||
+        cleanName.includes("resting_1")
+      ) {
+        marsStationResting1 = new THREE.Vector3();
+        child.getWorldPosition(marsStationResting1);
+      } else if (
+        cleanName.includes("station resting 2") ||
+        cleanName.includes("resting 2") ||
+        cleanName.includes("resting_2")
+      ) {
+        marsStationResting2 = new THREE.Vector3();
+        child.getWorldPosition(marsStationResting2);
+      } else if (
+        cleanName.includes("station resting 3") ||
+        cleanName.includes("resting 3") ||
+        cleanName.includes("resting_3")
+      ) {
+        marsStationResting3 = new THREE.Vector3();
+        child.getWorldPosition(marsStationResting3);
+      } else if (
+        cleanName.includes("camera pointer 2") ||
+        cleanName.includes("pointer 2") ||
+        cleanName.includes("pointer_2")
+      ) {
+        marsCameraPointer2 = new THREE.Vector3();
+        child.getWorldPosition(marsCameraPointer2);
+      } else if (
+        cleanName.includes("camera pointer 3") ||
+        cleanName.includes("pointer 3") ||
+        cleanName.includes("pointer_3")
+      ) {
+        marsCameraPointer3 = new THREE.Vector3();
+        child.getWorldPosition(marsCameraPointer3);
+      } else if (
+        cleanName.includes("camera pointer 1") ||
+        cleanName.includes("pointer 1") ||
+        cleanName.includes("pointer_1")
+      ) {
+        marsCameraPointer1 = new THREE.Vector3();
+        child.getWorldPosition(marsCameraPointer1);
       }
     });
   }
@@ -199,8 +260,12 @@ function extractMarkers(
     wormholeEntry: wormholeEntry ?? FALLBACK_WORMHOLE_ENTRY.clone(),
     wormholeExit: wormholeExit ?? FALLBACK_WORMHOLE_EXIT.clone(),
     marsStationEntry: marsStationEntry ?? FALLBACK_MARS_STATION_ENTRY.clone(),
-    marsStationResting: marsStationResting ?? FALLBACK_MARS_STATION_RESTING.clone(),
-    marsCameraPointer: marsCameraPointer ?? FALLBACK_MARS_CAMERA_POINTER.clone(),
+    marsStationResting1: marsStationResting1 ?? FALLBACK_MARS_STATION_RESTING_1.clone(),
+    marsStationResting2: marsStationResting2 ?? FALLBACK_MARS_STATION_RESTING_2.clone(),
+    marsStationResting3: marsStationResting3 ?? FALLBACK_MARS_STATION_RESTING_3.clone(),
+    marsCameraPointer1: marsCameraPointer1 ?? FALLBACK_MARS_CAMERA_POINTER_1.clone(),
+    marsCameraPointer2: marsCameraPointer2 ?? FALLBACK_MARS_CAMERA_POINTER_2.clone(),
+    marsCameraPointer3: marsCameraPointer3 ?? FALLBACK_MARS_CAMERA_POINTER_3.clone(),
     found: {
       boatVisibility: boatVisibility !== null,
       hubResting: hubResting !== null,
@@ -209,8 +274,12 @@ function extractMarkers(
       wormholeEntry: wormholeEntry !== null,
       wormholeExit: wormholeExit !== null,
       marsStationEntry: marsStationEntry !== null,
-      marsStationResting: marsStationResting !== null,
-      marsCameraPointer: marsCameraPointer !== null,
+      marsStationResting1: marsStationResting1 !== null,
+      marsStationResting2: marsStationResting2 !== null,
+      marsStationResting3: marsStationResting3 !== null,
+      marsCameraPointer1: marsCameraPointer1 !== null,
+      marsCameraPointer2: marsCameraPointer2 !== null,
+      marsCameraPointer3: marsCameraPointer3 !== null,
     },
   };
 }
@@ -257,15 +326,7 @@ function extractPathPoints(
   });
 
   if (points.length >= 70) {
-    // In camera_path_village.glb:
-    // Vertex 380 is Mountain Peak.
-    // Vertex 86 is the arrival at Hub Resting (dist = 0.11).
-    // Vertices 85 to 52 travel through the hallway to Wormhole Entry.
-    // Vertex 51 is Wormhole Entry.
-    // Vertices 50 to 18 travel back through the hallway to Hub Resting.
-    // Vertex 18 is Hub Resting at the start of the hallway.
-
-    // 1. Locate arrivalHubIdx: scanning backwards from Mountain Peak (points.length - 1) downwards
+    // 1. Locate arrivalHubIdx: scanning backwards from Mountain Peak downwards
     let arrivalHubIdx = -1;
     let minArrivalDist = Infinity;
     for (let i = points.length - 1; i >= 60; i--) {
@@ -299,12 +360,9 @@ function extractPathPoints(
     }
 
     if (arrivalHubIdx !== -1) {
-      // Main journey: Mountain Peak -> Village -> Docks -> Water -> Hub Resting
-      // Strictly terminates at Hub Resting without traveling to Wormhole Entry!
       const journey = points.slice(arrivalHubIdx, points.length).reverse();
       journey[journey.length - 1].copy(hubRestingPos);
 
-      // Departure journey: Hub Resting -> Hallway -> Archway -> Wormhole Entry
       let departure: THREE.Vector3[];
       if (depHubIdx !== -1 && bestExitIdx !== -1 && bestExitIdx > depHubIdx) {
         departure = points.slice(depHubIdx, bestExitIdx + 1);
@@ -343,15 +401,16 @@ function extractPathPoints(
 }
 
 /**
- * Extracts ordered world-space arrival path points for Mars Research Station.
- * In camera_path_mars.glb: Vertex 180 is at the beginning (near Wormhole_Exit),
- * and Vertex 0 is at the first resting point (near Mars_Station_Resting_1).
- * Sequences points from Beginning -> First Resting Point.
+ * Extracts ordered world-space path points for Mars Research Station.
+ * In camera_path_mars.glb:
+ * - Total vertices: 427.
+ * - Vertices 426 down to 212 form the continuous forward path (215 vertices):
+ *   Vertex 426 is Wormhole Exit ([-535.48, 170.26, -20.96], u = 0.0)
+ *   Vertex 258 is Resting 1 ([-598.80, 151.62, -26.47], u1 = 0.5692)
+ *   Vertex 229 is Resting 2 ([-617.89, 165.26, -46.66], u2 = 0.8194)
+ *   Vertex 212 is Resting 3 ([-639.49, 162.62, -37.70], u3 = 1.0)
  */
-function extractMarsPathPoints(
-  scene: THREE.Group,
-  restingPos: THREE.Vector3
-): {
+function extractMarsPathPoints(scene: THREE.Group): {
   marsPoints: THREE.Vector3[];
   nodeName: string;
 } {
@@ -381,23 +440,57 @@ function extractMarsPathPoints(
     }
   });
 
-  if (points.length >= 2) {
-    // Vertex 180 is at the beginning; vertex 0 is at the resting point.
-    // Reversing puts index 0 at the beginning of the Mars path, and the last
-    // index at the first Mars resting point.
-    const marsArrival = points.slice().reverse();
-    // Clamp exact arrival end to the resting marker
-    marsArrival[marsArrival.length - 1].copy(restingPos);
+  if (points.length >= 215) {
+    const marsPoints = points.slice(212, 427).reverse();
     return {
-      marsPoints: marsArrival,
+      marsPoints,
       nodeName: foundNodeName || "Camera_Path_Mars",
     };
   }
 
   return {
-    marsPoints: [new THREE.Vector3(-535.48, 170.26, -20.96), restingPos.clone()],
+    marsPoints: [
+      new THREE.Vector3(-535.48, 170.26, -20.96),
+      FALLBACK_MARS_STATION_RESTING_1.clone(),
+      FALLBACK_MARS_STATION_RESTING_2.clone(),
+      FALLBACK_MARS_STATION_RESTING_3.clone(),
+    ],
     nodeName: foundNodeName || "Camera_Path_Mars (fallback)",
   };
+}
+
+/**
+ * Computes forward viewing look target along the Mars path.
+ * Pure spatial function of path parameter u:
+ * Camera never turns 180-degrees during reverse movement;
+ * line-of-sight remains continuously oriented forward toward the station vistas.
+ */
+function getMarsLookTarget(
+  u: number,
+  curve: THREE.CatmullRomCurve3,
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  p3: THREE.Vector3
+): THREE.Vector3 {
+  const { RESTING_1, RESTING_2, RESTING_3 } = MARS_RESTING_U;
+
+  if (u <= RESTING_1) {
+    const lookAheadT = Math.min(RESTING_1, u + 0.04);
+    const lookAheadPt = curve.getPointAt(lookAheadT);
+    const tangent = curve.getTangentAt(u).normalize();
+    const curveTarget = lookAheadPt.addScaledVector(tangent, 15);
+
+    const blend = THREE.MathUtils.smoothstep(u, 0.35, RESTING_1);
+    return new THREE.Vector3().lerpVectors(curveTarget, p1, blend);
+  } else if (u <= RESTING_2) {
+    const t = (u - RESTING_1) / (RESTING_2 - RESTING_1);
+    const blend = THREE.MathUtils.smoothstep(t, 0, 1);
+    return new THREE.Vector3().lerpVectors(p1, p2, blend);
+  } else {
+    const t = THREE.MathUtils.clamp((u - RESTING_2) / (RESTING_3 - RESTING_2), 0, 1);
+    const blend = THREE.MathUtils.smoothstep(t, 0, 1);
+    return new THREE.Vector3().lerpVectors(p2, p3, blend);
+  }
 }
 
 export function CameraRig({
@@ -411,12 +504,20 @@ export function CameraRig({
   onNavigateSection,
   onMarsPathReady,
   onTeleportToMars,
+  onTeleportToHub,
   onAtMarsRestingChange,
   onDiagnostic,
 }: CameraRigProps) {
   const { camera } = useThree();
   const villageGltf = useGLTF(CAMERA_PATH_VILLAGE_URL, DRACO_DECODER_PATH, true);
   const marsGltf = useGLTF(CAMERA_PATH_MARS_URL, DRACO_DECODER_PATH, true);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { __MARS_SCENE__?: THREE.Group }).__MARS_SCENE__ =
+        marsGltf.scene;
+    }
+  }, [marsGltf.scene]);
 
   // Single continuous progress value along journey: 0.0 = Mountain, 1.0 = Hub Resting
   const progressRef = useRef<number>(0);
@@ -425,19 +526,15 @@ export function CameraRig({
   // Hub visibility and gradual fade state
   const isHubVisibleRef = useRef<boolean>(false);
   const maxHubFadeRef = useRef<number>(0);
-  const prevHubFadeRef = useRef<number>(-1);
   const isAtHubRestingRef = useRef<boolean>(false);
   const isTransitioningRef = useRef<boolean>(false);
 
-  // Departure and teleportation sequence animation parameters:
-  // departureAlign: 0 = looking at Camera Pointer; 1 = aligned with departure path forward tangent
-  // departureTravel: 0 = at Hub Resting; 1 = at wormhole entrance
-  // plungeTravel: 0 = at wormhole entrance; 1 = at wormhole throat void (teleport point)
-  // marsTravel: 0 = emerging from Mars wormhole exit; 1 = at first Mars resting point
+  // Departure and teleportation sequence animation parameters
   const departureAlignRef = useRef<{ value: number }>({ value: 0 });
   const departureTravelRef = useRef<{ value: number }>({ value: 0 });
   const plungeTravelRef = useRef<{ value: number }>({ value: 0 });
   const marsTravelRef = useRef<{ value: number }>({ value: 0 });
+  const marsRestingIndexRef = useRef<number>(1);
   const isTeleportedRef = useRef<boolean>(false);
   const isAtMarsRestingRef = useRef<boolean>(false);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
@@ -446,11 +543,13 @@ export function CameraRig({
   // Keep latest callback references in an effect so GSAP timelines are never interrupted by parent re-renders
   const onAtHubRestingChangeRef = useRef(onAtHubRestingChange);
   const onTeleportToMarsRef = useRef(onTeleportToMars);
+  const onTeleportToHubRef = useRef(onTeleportToHub);
   const onAtMarsRestingChangeRef = useRef(onAtMarsRestingChange);
 
   useEffect(() => {
     onAtHubRestingChangeRef.current = onAtHubRestingChange;
     onTeleportToMarsRef.current = onTeleportToMars;
+    onTeleportToHubRef.current = onTeleportToHub;
     onAtMarsRestingChangeRef.current = onAtMarsRestingChange;
   });
 
@@ -489,10 +588,7 @@ export function CameraRig({
       nodeName: extractedName,
     } = extractPathPoints(villageGltf.scene, extractedMarkers.hubResting, targetExitPos);
 
-    const { marsPoints } = extractMarsPathPoints(
-      marsGltf.scene,
-      extractedMarkers.marsStationResting
-    );
+    const { marsPoints } = extractMarsPathPoints(marsGltf.scene);
 
     const hasGlbVertices = journeyPoints.length >= 2;
     const constructedJourneyCurve = new THREE.CatmullRomCurve3(
@@ -511,7 +607,7 @@ export function CameraRig({
       "centripetal"
     );
 
-    // Calculate progress on the curve corresponding to Boat Visibility with sub-millimeter precision
+    // Calculate progress on the curve corresponding to Boat Visibility
     let minP = 0.7806;
     let minDist = Infinity;
     const SAMPLES = 5000;
@@ -557,8 +653,7 @@ export function CameraRig({
     }
   }, [marsCurve, onMarsPathReady]);
 
-  // Animate intentional transitions:
-  // Hub Resting -> Hallway -> Wormhole -> Event Horizon Plunge -> Mars Teleport -> Mars Resting
+  // Animate intentional transitions between sections
   useEffect(() => {
     if (activeSection === currentSectionRef.current) return;
 
@@ -573,29 +668,86 @@ export function CameraRig({
 
     if (activeSection === "home") {
       // Returning to Hub Resting
-      const tl = gsap.timeline({
-        onComplete: () => {
-          isTransitioningRef.current = false;
-          isAtHubRestingRef.current = true;
-          onAtHubRestingChangeRef.current?.(true);
-        },
-      });
-      timelineRef.current = tl;
-
       if (isTeleportedRef.current) {
-        // Reset from Mars back to Hub Resting
-        isTeleportedRef.current = false;
-        isAtMarsRestingRef.current = false;
-        onAtMarsRestingChangeRef.current?.(false);
-        marsTravelRef.current.value = 0;
-        plungeTravelRef.current.value = 0;
-        departureTravelRef.current.value = 0;
-        departureAlignRef.current.value = 0;
-        progressRef.current = 1.0;
-        camera.position.copy(markers.hubResting);
-        camera.lookAt(markers.cameraPointer);
+        // REVERSE WORMHOLE TELEPORTATION FROM MARS TO HUB:
+        // 1. Fast rewind from current Mars position along marsCurve to wormhole exit (u = 0.0)
+        // 2. Plunge into Mars wormhole throat void (100% black singularity)
+        // 3. Concealed environment switch inside the pitch-black core
+        // 4. Emerge out of Hub wormhole mouth into hallway
+        // 5. Retrace hallway back to Hub Resting
+        // 6. Smoothly re-align view with Camera Pointer
+        const currentMarsU = marsTravelRef.current.value;
+        const rewindDuration = Math.max(0.6, currentMarsU * 1.2);
+
+        const tl = gsap.timeline({
+          onComplete: () => {
+            isTransitioningRef.current = false;
+            isAtHubRestingRef.current = true;
+            onAtHubRestingChangeRef.current?.(true);
+          },
+        });
+        timelineRef.current = tl;
+
+        // Phase 1: Fast rewind to Mars wormhole exit if not already there
+        if (currentMarsU > 0.01) {
+          tl.to(marsTravelRef.current, {
+            value: 0,
+            duration: rewindDuration,
+            ease: "power2.inOut",
+          });
+        }
+
+        // Phase 2: Plunge into Mars wormhole throat void
+        tl.to(plungeTravelRef.current, {
+          value: 1,
+          duration: 0.8,
+          ease: "power2.in",
+        });
+
+        // Phase 3: Concealed switch inside pitch-black core void
+        tl.call(() => {
+          isTeleportedRef.current = false;
+          marsRestingIndexRef.current = 1;
+          marsTravelRef.current.value = 0;
+          isAtMarsRestingRef.current = false;
+          onAtMarsRestingChangeRef.current?.(false, 1);
+          onTeleportToHubRef.current?.();
+          progressRef.current = 1.0;
+          departureTravelRef.current.value = 1.0;
+          departureAlignRef.current.value = 1.0;
+        });
+
+        // Phase 4: Emerge out of Hub wormhole mouth into departure hallway
+        tl.to(plungeTravelRef.current, {
+          value: 0,
+          duration: 0.8,
+          ease: "power2.out",
+        });
+
+        // Phase 5: Travel backwards along departure path back to Hub Resting
+        tl.to(departureTravelRef.current, {
+          value: 0,
+          duration: hubRestingToNextArea.returnTravelDurationSec,
+          ease: hubRestingToNextArea.returnTravelEase,
+        });
+
+        // Phase 6: Smoothly re-align view to face Camera Pointer at Hub Resting
+        tl.to(departureAlignRef.current, {
+          value: 0,
+          duration: hubRestingToNextArea.returnAlignmentDurationSec,
+          ease: hubRestingToNextArea.returnAlignmentEase,
+        });
       } else {
         // Retrace departure path backwards back to Hub Resting
+        const tl = gsap.timeline({
+          onComplete: () => {
+            isTransitioningRef.current = false;
+            isAtHubRestingRef.current = true;
+            onAtHubRestingChangeRef.current?.(true);
+          },
+        });
+        timelineRef.current = tl;
+
         tl.to(departureTravelRef.current, {
           value: 0,
           duration: hubRestingToNextArea.returnTravelDurationSec,
@@ -616,8 +768,9 @@ export function CameraRig({
       const tl = gsap.timeline({
         onComplete: () => {
           isTransitioningRef.current = false;
+          marsRestingIndexRef.current = 1;
           isAtMarsRestingRef.current = true;
-          onAtMarsRestingChangeRef.current?.(true);
+          onAtMarsRestingChangeRef.current?.(true, 1);
         },
       });
       timelineRef.current = tl;
@@ -629,14 +782,14 @@ export function CameraRig({
         ease: hubRestingToNextArea.alignmentEase,
       });
 
-      // Phase 2: Accelerate along the traced departure path through hallway/stairs to wormhole entrance
+      // Phase 2: Accelerate along departure path through hallway to wormhole entrance
       tl.to(departureTravelRef.current, {
         value: 1,
         duration: hubRestingToNextArea.travelDurationSec,
         ease: hubRestingToNextArea.travelEase,
       });
 
-      // Phase 3: Plunge into the wormhole tunnel towards the pitch-black singularity throat
+      // Phase 3: Plunge into wormhole tunnel towards the pitch-black singularity throat
       tl.to(plungeTravelRef.current, {
         value: 1,
         duration: 1.25,
@@ -646,12 +799,14 @@ export function CameraRig({
       // Phase 4: Teleportation moment concealed inside the 100% pitch-black core void
       tl.call(() => {
         isTeleportedRef.current = true;
+        plungeTravelRef.current.value = 0;
+        marsTravelRef.current.value = 0;
         onTeleportToMarsRef.current?.();
       });
 
-      // Phase 5: Emerging from destination wormhole exit and gliding along Mars camera path
+      // Phase 5: Emerging from destination wormhole exit and gliding along Mars camera path to Resting 1
       tl.to(marsTravelRef.current, {
-        value: 1,
+        value: MARS_RESTING_U.RESTING_1,
         duration: 4.8,
         ease: "power2.out",
       });
@@ -669,53 +824,126 @@ export function CameraRig({
     if (!active) return;
 
     const handleWheel = (e: WheelEvent) => {
-      // Prevent browser default document scroll during guided camera travel
       e.preventDefault();
 
-      // If a section transition is actively animating, ignore wheel inputs
+      // If an intentional camera transition is actively animating, ignore wheel inputs
       if (isTransitioningRef.current) {
         return;
       }
 
-      // At Hub Resting:
+      // 1. MARS ENVIRONMENT NAVIGATION (Resting 1 -> Resting 2 -> Resting 3)
+      if (isTeleportedRef.current) {
+        const currentIndex = marsRestingIndexRef.current;
+
+        if (e.deltaY > 15) {
+          // Scroll DOWN: Forward navigation along Mars path
+          if (currentIndex === 1) {
+            // Forward 1 -> 2
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 2;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 1);
+            gsap.to(marsTravelRef.current, {
+              value: MARS_RESTING_U.RESTING_2,
+              duration: 2.8,
+              ease: "power2.inOut",
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtMarsRestingRef.current = true;
+                onAtMarsRestingChangeRef.current?.(true, 2);
+              },
+            });
+            return;
+          } else if (currentIndex === 2) {
+            // Forward 2 -> 3
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 3;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 2);
+            gsap.to(marsTravelRef.current, {
+              value: MARS_RESTING_U.RESTING_3,
+              duration: 2.4,
+              ease: "power2.inOut",
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtMarsRestingRef.current = true;
+                onAtMarsRestingChangeRef.current?.(true, 3);
+              },
+            });
+            return;
+          } else {
+            // At Resting 3: at end of path
+            return;
+          }
+        } else if (e.deltaY < -15) {
+          // Scroll UP: Reverse navigation (Fast cinematic rewind, camera does NOT turn 180 degrees)
+          if (currentIndex === 3) {
+            // Reverse 3 -> 2
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 2;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 3);
+            gsap.to(marsTravelRef.current, {
+              value: MARS_RESTING_U.RESTING_2,
+              duration: 1.1, // Significantly faster rewind
+              ease: "power2.inOut",
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtMarsRestingRef.current = true;
+                onAtMarsRestingChangeRef.current?.(true, 2);
+              },
+            });
+            return;
+          } else if (currentIndex === 2) {
+            // Reverse 2 -> 1
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 1;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 2);
+            gsap.to(marsTravelRef.current, {
+              value: MARS_RESTING_U.RESTING_1,
+              duration: 1.3, // Significantly faster rewind
+              ease: "power2.inOut",
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtMarsRestingRef.current = true;
+                onAtMarsRestingChangeRef.current?.(true, 1);
+              },
+            });
+            return;
+          } else {
+            // At Resting 1: LOCKED. Strictly ignore upward scroll; do NOT auto-teleport to Hub!
+            return;
+          }
+        }
+        return;
+      }
+
+      // 2. HUB RESTING NAVIGATION
       if (isAtHubRestingRef.current && currentSectionRef.current === "home") {
         if (e.deltaY > 15) {
-          // Scrolling down at Hub Resting triggers intentional departure sequence towards next section
           isTransitioningRef.current = true;
           onScrollDownAtHub?.();
           onNavigateSection?.("project-geofence");
           return;
         } else if (e.deltaY < 0 && CAMERA_CONFIG.boundaries.lockReverseAtHubResting) {
-          // TREAT HUB_RESTING AS A NAVIGATION BOUNDARY:
-          // Strictly ignore upward scroll input when resting at Hub.
-          // Do NOT allow the camera to move backwards into the village.
+          // Strictly ignore upward scroll input when resting at Hub
           return;
         }
         return;
-      } else if (currentSectionRef.current !== "home") {
-        if (e.deltaY < -15) {
-          // Scrolling up in a secondary section returns to Hub Resting
-          isTransitioningRef.current = true;
-          onNavigateSection?.("home");
-          return;
-        }
       }
 
-      // Normalize delta across continuous trackpads and stepped mouse wheels
+      // 3. VILLAGE JOURNEY VELOCITY INTEGRATION
       const sign = Math.sign(e.deltaY);
       const magnitude = Math.min(Math.abs(e.deltaY), 80);
       const impulse = sign * magnitude * CAMERA_CONFIG.scrollDynamics.scrollSensitivity;
 
-      // Accumulate target scroll velocity:
-      // Positive deltaY (scroll down) accelerates forward up to maxForwardBoostProgress
-      // Negative deltaY (scroll up) accelerates in reverse down to -maxReverseSpeedProgress
       targetScrollVelocityRef.current = THREE.MathUtils.clamp(
         targetScrollVelocityRef.current + impulse,
         -CAMERA_CONFIG.scrollDynamics.maxReverseSpeedProgress,
         CAMERA_CONFIG.scrollDynamics.maxForwardBoostProgress
       );
 
-      // Smoothly transition scroll velocity using GSAP
       gsap.to(velocityStateRef.current, {
         scrollVelocity: targetScrollVelocityRef.current,
         duration: CAMERA_CONFIG.scrollDynamics.accelerationDurationSec,
@@ -727,7 +955,6 @@ export function CameraRig({
         clearTimeout(decelTimeoutRef.current);
       }
 
-      // When scrolling stops, smoothly ease scroll velocity to 0
       decelTimeoutRef.current = setTimeout(() => {
         targetScrollVelocityRef.current = 0;
         gsap.to(velocityStateRef.current, {
@@ -747,7 +974,7 @@ export function CameraRig({
         clearTimeout(decelTimeoutRef.current);
       }
     };
-  }, [active, onScrollDownAtHub, onNavigateSection, onAtHubRestingChange]);
+  }, [active, onScrollDownAtHub, onNavigateSection]);
 
   // Mouse move listener: horizontal look influence
   useEffect(() => {
@@ -779,12 +1006,12 @@ export function CameraRig({
       velocityStateRef.current.scrollVelocity = 0;
       isHubVisibleRef.current = false;
       maxHubFadeRef.current = 0;
-      prevHubFadeRef.current = -1;
       isAtHubRestingRef.current = false;
       departureAlignRef.current.value = 0;
       departureTravelRef.current.value = 0;
       plungeTravelRef.current.value = 0;
       marsTravelRef.current.value = 0;
+      marsRestingIndexRef.current = 1;
       isTeleportedRef.current = false;
       isAtMarsRestingRef.current = false;
     }
@@ -813,7 +1040,7 @@ export function CameraRig({
       onComplete?.();
     }
 
-    // Autonomous progress velocity (du/dt) derived from centralized CAMERA_CONFIG speeds
+    // Autonomous progress velocity derived from centralized CAMERA_CONFIG speeds
     const totalCurveLength = curve.getLength();
     const baseProgressVelocity = isAtHubRestingRef.current
       ? 0
@@ -834,27 +1061,23 @@ export function CameraRig({
       1
     );
 
-    // If camera reversed before the end (only possible if lockReverse is disabled), clear resting state
-    if (
-      progressRef.current < 0.985 &&
-      isAtHubRestingRef.current &&
-      !CAMERA_CONFIG.boundaries.lockReverseAtHubResting
-    ) {
-      isAtHubRestingRef.current = false;
-      onAtHubRestingChange?.(false);
-    }
-
     // Notify progress change
     if (Math.abs(progressRef.current - prevProgressRef.current) > 0.0001) {
       prevProgressRef.current = progressRef.current;
       onProgress?.(progressRef.current);
     }
 
+    // Expose diagnostics and test harnesses
     if (typeof window !== "undefined") {
       (
         window as unknown as { __SET_CAMERA_PROGRESS__?: (p: number) => void }
       ).__SET_CAMERA_PROGRESS__ = (p: number) => {
         progressRef.current = p;
+      };
+      (
+        window as unknown as { __TRIGGER_SCROLL_WHEEL__?: (deltaY: number) => void }
+      ).__TRIGGER_SCROLL_WHEEL__ = (deltaY: number) => {
+        window.dispatchEvent(new WheelEvent("wheel", { deltaY, cancelable: true }));
       };
       (window as unknown as { __CAMERA_DIAGNOSTICS__: unknown }).__CAMERA_DIAGNOSTICS__ =
         {
@@ -866,9 +1089,12 @@ export function CameraRig({
           departureTravel: departureTravelRef.current.value,
           plungeTravel: plungeTravelRef.current.value,
           marsTravel: marsTravelRef.current.value,
+          marsRestingIndex: marsRestingIndexRef.current,
           isTeleported: isTeleportedRef.current,
           isAtMarsResting: isAtMarsRestingRef.current,
           cameraPosition: camera.position.toArray(),
+          cameraRotation: camera.rotation.toArray(),
+          cameraDirection: camera.getWorldDirection(new THREE.Vector3()).toArray(),
           markers: markers.found,
           journeyLength: curve.getLength(),
           departureLength: departureCurve.getLength(),
@@ -876,13 +1102,9 @@ export function CameraRig({
         };
     }
 
-    // Gradual Hub appearance: begins revealing at Boat_Visibility and smoothly fades in.
-    // Reaches full opacity within the final 20–25% of the distance between Boat_Visibility and Hub_Resting.
-    // Uses smooth quadratic ease-out curve (t * (2 - t)) for natural visual approach.
-    // Once revealed, keep it visible permanently during that visit, including when moving backwards.
+    // Gradual Hub appearance
     let currentFade = 0;
     if (progressRef.current >= boatVisibilityProgress) {
-      // Reaches 100% full opacity at 77.5% of the span (leaving final 22.5% distance solid)
       const fadeEndProgress =
         boatVisibilityProgress + (1.0 - boatVisibilityProgress) * 0.775;
       const t = THREE.MathUtils.clamp(
@@ -891,13 +1113,11 @@ export function CameraRig({
         0,
         1
       );
-      // Quadratic ease-out: rapid natural reveal, smooth zero-derivative arrival at 1.0
       currentFade = t * (2 - t);
     }
     maxHubFadeRef.current = Math.max(maxHubFadeRef.current, currentFade);
     const effectiveFade = maxHubFadeRef.current;
 
-    // Imperative store update without triggering 60 FPS React re-renders
     hubFadeState.fade = effectiveFade;
 
     if (!isHubVisibleRef.current && effectiveFade > 0.001) {
@@ -927,23 +1147,34 @@ export function CameraRig({
     let baseTarget: THREE.Vector3;
 
     if (isTeleported) {
-      // In Mars environment: traveling along Mars camera path
-      currentPos = marsCurve.getPointAt(marsTravel);
-      forwardDir = marsCurve.getTangentAt(marsTravel).normalize();
+      if (plungeTravel > 0.0001) {
+        // Plunging from Mars wormhole exit into singularity throat void during return to Hub
+        const marsExitPt = marsCurve.getPointAt(0);
+        const marsTangent = marsCurve.getTangentAt(0).normalize();
+        const marsThroatPt = marsExitPt.clone().addScaledVector(marsTangent, -20);
+        currentPos = new THREE.Vector3().lerpVectors(
+          marsExitPt,
+          marsThroatPt,
+          plungeTravel
+        );
+        forwardDir = marsTangent.clone().negate();
+        baseTarget = marsThroatPt.clone().addScaledVector(marsTangent, -10);
+      } else {
+        // In Mars environment: traveling along Mars camera path (Resting 1 -> 2 -> 3)
+        currentPos = marsCurve.getPointAt(marsTravel);
+        forwardDir = marsCurve.getTangentAt(marsTravel).normalize();
 
-      const lookAheadT = Math.min(1.0, marsTravel + 0.04);
-      const lookAheadPt = marsCurve.getPointAt(lookAheadT);
-      const curveTarget = lookAheadPt.addScaledVector(forwardDir, 12);
-
-      // Smoothly blend view towards Mars_Camera_Pointer_1 as we arrive at the first resting point
-      const marsLookBlend = THREE.MathUtils.smoothstep(marsTravel, 0.72, 1.0);
-      baseTarget = new THREE.Vector3().lerpVectors(
-        curveTarget,
-        markers.marsCameraPointer,
-        marsLookBlend
-      );
+        // Target is computed as a pure spatial function of u: zero 180-degree flip during reverse
+        baseTarget = getMarsLookTarget(
+          marsTravel,
+          marsCurve,
+          markers.marsCameraPointer1,
+          markers.marsCameraPointer2,
+          markers.marsCameraPointer3
+        );
+      }
     } else if (plungeTravel > 0.0001) {
-      // Plunging from wormhole entrance into the pitch-black singularity throat
+      // Plunging from Hub wormhole entrance into pitch-black singularity throat void
       const whEntry = departureCurve.getPointAt(1.0);
       const whThroat = new THREE.Vector3(-407.8, 26.81, -23.125);
       currentPos = new THREE.Vector3().lerpVectors(whEntry, whThroat, plungeTravel);
@@ -990,7 +1221,6 @@ export function CameraRig({
         }
       }
 
-      // Smoothly blend viewing direction towards Camera Pointer as we approach Hub Resting
       const hubLookBlend = THREE.MathUtils.smoothstep(progressRef.current, 0.88, 1.0);
       baseTarget = new THREE.Vector3().lerpVectors(
         curveTarget,
@@ -1006,7 +1236,6 @@ export function CameraRig({
       rawLookForward.lengthSq() < 0.0001 ? forwardDir.clone() : rawLookForward;
     const lookRight = new THREE.Vector3().crossVectors(lookForward, WORLD_UP).normalize();
 
-    // Yaw rotation offset: positive mouseX turns view right relative to forward path heading
     const lookAngle =
       smoothedMouseXRef.current * CAMERA_CONFIG.orientationDynamics.maxMouseLookAngleRad;
     const finalLookDir = lookForward
