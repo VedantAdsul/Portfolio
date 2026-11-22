@@ -20,6 +20,9 @@ export function App() {
   // Hub starts completely hidden on initial page load until Boat_Visibility marker is crossed
   const [isHubVisible, setIsHubVisible] = useState<boolean>(false);
   const [isAtHubResting, setIsAtHubResting] = useState<boolean>(false);
+  // Mars Research Station starts hidden until wormhole teleportation
+  const [isMarsVisible, setIsMarsVisible] = useState<boolean>(false);
+  const [isWormholeVisible] = useState<boolean>(true);
 
   const { activeSection, goToSection, nextSection } = useSectionNavigation();
 
@@ -61,6 +64,9 @@ export function App() {
         onScrollDownAtHub={nextSection}
         activeSection={activeSection.id}
         onNavigateSection={goToSection}
+        isWormholeVisible={isWormholeVisible}
+        isMarsVisible={isMarsVisible}
+        onMarsVisibilityChange={setIsMarsVisible}
         enableOrbitControls={false}
       />
 

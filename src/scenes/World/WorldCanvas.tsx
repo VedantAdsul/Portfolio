@@ -13,6 +13,9 @@ import * as THREE from "three";
 import { WorldEnvironment } from "./WorldEnvironment";
 import { VillageScene } from "./VillageScene";
 import { HubScene } from "./HubScene";
+import { WormholeScene } from "./WormholeScene";
+import { WormholeBloom } from "./WormholeBloom";
+import { ResearchScene } from "./ResearchScene";
 import { WorldFallback } from "./WorldFallback";
 import { CameraRig, DEFAULT_CAMERA_FOV } from "./CameraRig";
 import type { SectionId } from "../../data/sections";
@@ -27,11 +30,16 @@ export interface WorldCanvasProps {
   onJourneyProgress?: (progress: number) => void;
   onJourneyComplete?: () => void;
   isHubVisible?: boolean;
+  hubOpacity?: number;
   onHubVisibilityChange?: (visible: boolean) => void;
+  onHubFadeChange?: (fade: number) => void;
   onAtHubRestingChange?: (atResting: boolean) => void;
   onScrollDownAtHub?: () => void;
   activeSection?: SectionId;
   onNavigateSection?: (section: SectionId) => void;
+  isWormholeVisible?: boolean;
+  isMarsVisible?: boolean;
+  onMarsVisibilityChange?: (visible: boolean) => void;
 }
 
 interface SceneErrorBoundaryProps {
@@ -93,10 +101,13 @@ export function WorldCanvas({
   onJourneyComplete,
   isHubVisible = false,
   onHubVisibilityChange,
+  onHubFadeChange,
   onAtHubRestingChange,
   onScrollDownAtHub,
   activeSection = "home",
   onNavigateSection,
+  isWormholeVisible = true,
+  isMarsVisible = false,
 }: WorldCanvasProps) {
   return (
     <div
@@ -121,10 +132,20 @@ export function WorldCanvas({
           powerPreference: "high-performance",
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: 1.1,
+          preserveDrawingBuffer: true,
         }}
         dpr={[1, 1.5]}
         shadows={{ type: THREE.PCFSoftShadowMap }}
-        onCreated={() => {
+        onCreated={(state) => {
+          if (typeof window !== "undefined") {
+            (window as unknown as { __THREE_SCENE__: THREE.Scene }).__THREE_SCENE__ =
+              state.scene;
+            (window as unknown as { __THREE_CAMERA__: THREE.Camera }).__THREE_CAMERA__ =
+              state.camera;
+            (window as unknown as { __THREE_GL__: THREE.WebGLRenderer }).__THREE_GL__ =
+              state.gl;
+            (window as unknown as { __THREE__: typeof THREE }).__THREE__ = THREE;
+          }
           onCreated?.();
         }}
       >
@@ -141,6 +162,7 @@ export function WorldCanvas({
               onProgress={onJourneyProgress}
               onComplete={onJourneyComplete}
               onHubVisibilityChange={onHubVisibilityChange}
+              onHubFadeChange={onHubFadeChange}
               onAtHubRestingChange={onAtHubRestingChange}
               onScrollDownAtHub={onScrollDownAtHub}
               activeSection={activeSection}
@@ -152,9 +174,31 @@ export function WorldCanvas({
           {/* Preloaded HubScene mounted in its own independent Suspense.
               Loads in advance in the background without blocking initial Village render.
               Remains mounted in the Three.js scene graph with visible={isHubVisible}
-              so visibility toggles instantaneously at the boat marker with zero re-decoding. */}
+              and smoothly fades in from Boat_Visibility to Hub_Resting via opacity prop. */}
           <Suspense fallback={null}>
             <HubScene visible={isHubVisible} />
+          </Suspense>
+
+          {/* Preloaded WormholeScene mounted in its own independent Suspense.
+              Loads wormhole.glb and runs vortex rotation animations.
+              Village Hub rig is positioned at the hallway exit. */}
+          <Suspense fallback={null}>
+            <WormholeScene
+              visible={isWormholeVisible}
+              hubRigVisible={true}
+              marsRigVisible={isMarsVisible}
+            />
+          </Suspense>
+
+          {/* Controlled post-processing bloom for cosmic wormhole ribbons */}
+          <WormholeBloom enabled={isWormholeVisible} />
+
+          {/* Preloaded ResearchScene (Mars Station) mounted in its own independent Suspense.
+              Geometry, textures, and shaders are resident in GPU memory before teleportation.
+              Remains invisible (visible={false}) throughout the village journey so it
+              consumes zero draw calls and cannot be seen behind the village terrain. */}
+          <Suspense fallback={null}>
+            <ResearchScene visible={isMarsVisible} />
           </Suspense>
         </SceneErrorBoundary>
 

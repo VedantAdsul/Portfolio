@@ -2,5 +2,8 @@ export * from "./WorldCanvas";
 export * from "./WorldEnvironment";
 export * from "./VillageScene";
 export * from "./HubScene";
+export * from "./WormholeScene";
+export * from "./ResearchScene";
 export * from "./WorldFallback";
 export * from "./CameraRig";
+export * from "./gltfLoaderConfig";

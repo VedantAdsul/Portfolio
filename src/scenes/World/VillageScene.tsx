@@ -9,12 +9,9 @@
 import { useGLTF } from "@react-three/drei";
 import { useEffect, useLayoutEffect } from "react";
 import * as THREE from "three";
+import { DRACO_DECODER_PATH, VILLAGE_MODEL_URL } from "./gltfLoaderConfig";
 
-export const VILLAGE_MODEL_URL = "/assets/world/village.glb";
-export const DRACO_DECODER_PATH = "/draco/";
-
-// Ensure Draco decoder loads locally from public/draco/ rather than external CDN
-useGLTF.setDecoderPath(DRACO_DECODER_PATH);
+export { VILLAGE_MODEL_URL, DRACO_DECODER_PATH };
 
 // Pattern to identify genuinely semi-transparent materials that should retain alpha blending
 const TRANSLUCENT_MATERIAL_REGEX = /glass|water|ice|stained/i;

@@ -41,8 +41,14 @@ import {
 } from "../../data/cameraPathPoints";
 import { CAMERA_CONFIG, getJourneyProgressVelocity } from "../../config/cameraConfig";
 import type { SectionId } from "../../data/sections";
+import {
+  CAMERA_PATH_MARS_URL,
+  CAMERA_PATH_VILLAGE_URL,
+  DRACO_DECODER_PATH,
+} from "./gltfLoaderConfig";
+import { hubFadeState } from "./hubFadeState";
 
-export const CAMERA_PATH_URL = "/assets/world/camera_path.glb";
+export const CAMERA_PATH_URL = CAMERA_PATH_VILLAGE_URL;
 export const DEFAULT_CAMERA_FOV = 58;
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -52,17 +58,32 @@ const FALLBACK_BOAT_VISIBILITY = new THREE.Vector3(-159.7057, 9.8877, -14.1756);
 const FALLBACK_HUB_RESTING = new THREE.Vector3(-274.015, 15.7716, -19.552);
 const FALLBACK_CAMERA_POINTER = new THREE.Vector3(-296.2811, 28.9538, -4.1265);
 const FALLBACK_NEXT_AREA = new THREE.Vector3(-383.8439, 24.4108, -23.0299);
+const FALLBACK_WORMHOLE_ENTRY = new THREE.Vector3(-385.9731, 26.8341, -22.6255);
+const FALLBACK_WORMHOLE_EXIT = new THREE.Vector3(-430.0504, 26.9651, -23.8131);
+const FALLBACK_MARS_STATION_ENTRY = new THREE.Vector3(-537.0149, 171.031, -21.4217);
+const FALLBACK_MARS_STATION_RESTING = new THREE.Vector3(-557.5784, 165.6332, -21.6792);
+const FALLBACK_MARS_CAMERA_POINTER = new THREE.Vector3(-632.1886, 180.7053, -10.4269);
 
 export interface BlenderMarkers {
   boatVisibility: THREE.Vector3;
   hubResting: THREE.Vector3;
   cameraPointer: THREE.Vector3;
   nextArea: THREE.Vector3 | null;
+  wormholeEntry: THREE.Vector3;
+  wormholeExit: THREE.Vector3;
+  marsStationEntry: THREE.Vector3;
+  marsStationResting: THREE.Vector3;
+  marsCameraPointer: THREE.Vector3;
   found: {
     boatVisibility: boolean;
     hubResting: boolean;
     cameraPointer: boolean;
     nextArea: boolean;
+    wormholeEntry: boolean;
+    wormholeExit: boolean;
+    marsStationEntry: boolean;
+    marsStationResting: boolean;
+    marsCameraPointer: boolean;
   };
 }
 
@@ -75,6 +96,8 @@ export interface CameraRigProps {
   onComplete?: () => void;
   /** Called when the camera crosses Boat Visibility to toggle Hub visibility */
   onHubVisibilityChange?: (visible: boolean) => void;
+  /** Called with normalized Hub fade-in progress [0.0 - 1.0] starting at Boat Visibility */
+  onHubFadeChange?: (fade: number) => void;
   /** Called when camera settles at Hub Resting or leaves it */
   onAtHubRestingChange?: (atResting: boolean) => void;
   /** Called when user scrolls down from Hub Resting to trigger transition to next area */
@@ -94,22 +117,35 @@ export interface CameraRigProps {
       hubResting: boolean;
       cameraPointer: boolean;
       nextArea: boolean;
+      wormholeEntry?: boolean;
+      wormholeExit?: boolean;
+      marsStationEntry?: boolean;
+      marsStationResting?: boolean;
+      marsCameraPointer?: boolean;
     };
   }) => void;
 }
 
 /**
- * Extracts named Empty positional markers from the Blender glTF scene.
+ * Extracts named Empty positional markers from the Blender glTF scene(s).
  */
-function extractMarkers(scene: THREE.Group): BlenderMarkers {
+function extractMarkers(
+  villageScene: THREE.Group,
+  marsScene?: THREE.Group
+): BlenderMarkers {
   let boatVisibility: THREE.Vector3 | null = null;
   let hubResting: THREE.Vector3 | null = null;
   let cameraPointer: THREE.Vector3 | null = null;
   let nextArea: THREE.Vector3 | null = null;
+  let wormholeEntry: THREE.Vector3 | null = null;
+  let wormholeExit: THREE.Vector3 | null = null;
+  let marsStationEntry: THREE.Vector3 | null = null;
+  let marsStationResting: THREE.Vector3 | null = null;
+  let marsCameraPointer: THREE.Vector3 | null = null;
 
-  scene.updateMatrixWorld(true);
+  villageScene.updateMatrixWorld(true);
 
-  scene.traverse((child) => {
+  villageScene.traverse((child) => {
     const cleanName = child.name.replace(/_/g, " ").toLowerCase().trim();
     if (cleanName === "boat visibility" || cleanName.includes("boat visibility")) {
       boatVisibility = new THREE.Vector3();
@@ -123,19 +159,58 @@ function extractMarkers(scene: THREE.Group): BlenderMarkers {
     } else if (cleanName === "next area" || cleanName.includes("next area")) {
       nextArea = new THREE.Vector3();
       child.getWorldPosition(nextArea);
+    } else if (cleanName === "wormhole entry" || cleanName.includes("wormhole entry")) {
+      wormholeEntry = new THREE.Vector3();
+      child.getWorldPosition(wormholeEntry);
+    } else if (cleanName === "wormhole exit" || cleanName.includes("wormhole exit")) {
+      wormholeExit = new THREE.Vector3();
+      child.getWorldPosition(wormholeExit);
     }
   });
+
+  if (marsScene) {
+    marsScene.updateMatrixWorld(true);
+    marsScene.traverse((child) => {
+      const cleanName = child.name.replace(/_/g, " ").toLowerCase().trim();
+      if (cleanName === "mars station entry" || cleanName.includes("station entry")) {
+        marsStationEntry = new THREE.Vector3();
+        child.getWorldPosition(marsStationEntry);
+      } else if (
+        cleanName === "mars station resting" ||
+        cleanName.includes("station resting")
+      ) {
+        marsStationResting = new THREE.Vector3();
+        child.getWorldPosition(marsStationResting);
+      } else if (
+        cleanName === "mars camera pointer" ||
+        cleanName.includes("mars camera pointer")
+      ) {
+        marsCameraPointer = new THREE.Vector3();
+        child.getWorldPosition(marsCameraPointer);
+      }
+    });
+  }
 
   return {
     boatVisibility: boatVisibility ?? FALLBACK_BOAT_VISIBILITY.clone(),
     hubResting: hubResting ?? FALLBACK_HUB_RESTING.clone(),
     cameraPointer: cameraPointer ?? FALLBACK_CAMERA_POINTER.clone(),
-    nextArea: nextArea ?? FALLBACK_NEXT_AREA.clone(),
+    nextArea: nextArea ?? wormholeEntry ?? FALLBACK_NEXT_AREA.clone(),
+    wormholeEntry: wormholeEntry ?? FALLBACK_WORMHOLE_ENTRY.clone(),
+    wormholeExit: wormholeExit ?? FALLBACK_WORMHOLE_EXIT.clone(),
+    marsStationEntry: marsStationEntry ?? FALLBACK_MARS_STATION_ENTRY.clone(),
+    marsStationResting: marsStationResting ?? FALLBACK_MARS_STATION_RESTING.clone(),
+    marsCameraPointer: marsCameraPointer ?? FALLBACK_MARS_CAMERA_POINTER.clone(),
     found: {
       boatVisibility: boatVisibility !== null,
       hubResting: hubResting !== null,
       cameraPointer: cameraPointer !== null,
-      nextArea: nextArea !== null,
+      nextArea: nextArea !== null || wormholeEntry !== null,
+      wormholeEntry: wormholeEntry !== null,
+      wormholeExit: wormholeExit !== null,
+      marsStationEntry: marsStationEntry !== null,
+      marsStationResting: marsStationResting !== null,
+      marsCameraPointer: marsCameraPointer !== null,
     },
   };
 }
@@ -144,12 +219,12 @@ function extractMarkers(scene: THREE.Group): BlenderMarkers {
  * Extracts ordered world-space path points from a glTF scene object if present.
  * Returns:
  * 1. journeyPoints: Mountain Peak -> Village -> Docks -> Water -> Hub Resting
- * 2. departurePoints: Hub Resting -> Hallway -> Archway -> Next Area (Workshop)
+ * 2. departurePoints: Hub Resting -> Hallway -> Archway -> Wormhole Entry / Next Area
  */
 function extractPathPoints(
   scene: THREE.Group,
   hubRestingPos: THREE.Vector3,
-  nextAreaPos: THREE.Vector3
+  targetExitPos: THREE.Vector3
 ): {
   journeyPoints: THREE.Vector3[];
   departurePoints: THREE.Vector3[];
@@ -182,52 +257,68 @@ function extractPathPoints(
   });
 
   if (points.length >= 70) {
-    // Locate the point closest to Hub Resting along the village-to-hub sequence
-    let bestHubIdx = -1;
-    let minHubDist = Infinity;
-    for (let i = 0; i < points.length; i++) {
+    // In camera_path_village.glb:
+    // Vertex 380 is Mountain Peak.
+    // Vertex 86 is the arrival at Hub Resting (dist = 0.11).
+    // Vertices 85 to 52 travel through the hallway to Wormhole Entry.
+    // Vertex 51 is Wormhole Entry.
+    // Vertices 50 to 18 travel back through the hallway to Hub Resting.
+    // Vertex 18 is Hub Resting at the start of the hallway.
+
+    // 1. Locate arrivalHubIdx: scanning backwards from Mountain Peak (points.length - 1) downwards
+    let arrivalHubIdx = -1;
+    let minArrivalDist = Infinity;
+    for (let i = points.length - 1; i >= 60; i--) {
       const d = points[i].distanceTo(hubRestingPos);
-      if (d < minHubDist && i >= 50) {
-        minHubDist = d;
-        bestHubIdx = i;
+      if (d < minArrivalDist) {
+        minArrivalDist = d;
+        arrivalHubIdx = i;
       }
     }
 
-    // Locate the point closest to Next Area (before Hub Resting in vertex order)
-    let bestNextAreaIdx = -1;
-    let minNextDist = Infinity;
-    for (let i = 0; i < bestHubIdx; i++) {
-      const d = points[i].distanceTo(nextAreaPos);
-      if (d < minNextDist) {
-        minNextDist = d;
-        bestNextAreaIdx = i;
+    // 2. Locate departure destination index (Wormhole Entry / Next Area)
+    let bestExitIdx = -1;
+    let minExitDist = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = points[i].distanceTo(targetExitPos);
+      if (d < minExitDist) {
+        minExitDist = d;
+        bestExitIdx = i;
       }
     }
 
-    if (bestHubIdx !== -1) {
-      // The curve in camera_path.glb has Mountain Peak at the end of the vertex array
-      // and Hub Resting at bestHubIdx (~67). Reverse to traverse from Mountain Peak -> Hub.
-      const journey = points.slice(bestHubIdx, points.length).reverse();
+    // 3. Locate departure starting index at Hub Resting (near index 18)
+    let depHubIdx = -1;
+    let minDepHubDist = Infinity;
+    for (let i = 0; i < 40; i++) {
+      const d = points[i].distanceTo(hubRestingPos);
+      if (d < minDepHubDist) {
+        minDepHubDist = d;
+        depHubIdx = i;
+      }
+    }
+
+    if (arrivalHubIdx !== -1) {
+      // Main journey: Mountain Peak -> Village -> Docks -> Water -> Hub Resting
+      // Strictly terminates at Hub Resting without traveling to Wormhole Entry!
+      const journey = points.slice(arrivalHubIdx, points.length).reverse();
       journey[journey.length - 1].copy(hubRestingPos);
 
-      // Departure path from Hub Resting to Next Area (vertices 67 down to 42)
+      // Departure journey: Hub Resting -> Hallway -> Archway -> Wormhole Entry
       let departure: THREE.Vector3[];
-      if (bestNextAreaIdx !== -1 && bestNextAreaIdx < bestHubIdx) {
-        departure = points.slice(bestNextAreaIdx, bestHubIdx + 1).reverse();
-        departure[0].copy(hubRestingPos);
-        departure[departure.length - 1].copy(nextAreaPos);
+      if (depHubIdx !== -1 && bestExitIdx !== -1 && bestExitIdx > depHubIdx) {
+        departure = points.slice(depHubIdx, bestExitIdx + 1);
       } else {
-        departure = HUB_DEPARTURE_PATH_POINTS.map(
-          (p) => new THREE.Vector3(p[0], p[1], p[2])
-        );
-        departure[0].copy(hubRestingPos);
-        departure[departure.length - 1].copy(nextAreaPos);
+        const startIdx = depHubIdx !== -1 ? depHubIdx : 18;
+        departure = points.slice(startIdx, Math.min(points.length, startIdx + 34));
       }
+      departure[0].copy(hubRestingPos);
+      departure[departure.length - 1].copy(targetExitPos);
 
       return {
         journeyPoints: journey,
         departurePoints: departure,
-        nodeName: foundNodeName || "Camera_Path_Main",
+        nodeName: foundNodeName || "Camera_Path_Village",
       };
     }
   }
@@ -242,12 +333,67 @@ function extractPathPoints(
     (p) => new THREE.Vector3(p[0], p[1], p[2])
   );
   fallbackDeparture[0].copy(hubRestingPos);
-  fallbackDeparture[fallbackDeparture.length - 1].copy(nextAreaPos);
+  fallbackDeparture[fallbackDeparture.length - 1].copy(targetExitPos);
 
   return {
     journeyPoints: fallbackJourney,
     departurePoints: fallbackDeparture,
     nodeName: foundNodeName || "Camera_Path_Main (fallback)",
+  };
+}
+
+/**
+ * Extracts ordered world-space arrival path points for Mars Research Station.
+ * In camera_path_mars.glb: index 48 is Mars_Station_Entry, index 0 is Mars_Station_Resting.
+ * Sequences points from Entry -> Resting.
+ */
+function extractMarsPathPoints(
+  scene: THREE.Group,
+  entryPos: THREE.Vector3,
+  restingPos: THREE.Vector3
+): {
+  marsPoints: THREE.Vector3[];
+  nodeName: string;
+} {
+  const points: THREE.Vector3[] = [];
+  let foundNodeName = "";
+
+  scene.updateMatrixWorld(true);
+
+  scene.traverse((child) => {
+    const isTargetName =
+      child.name.toLowerCase().includes("mars") ||
+      child.name.toLowerCase().includes("path");
+
+    if (isTargetName && !foundNodeName) {
+      foundNodeName = child.name;
+    }
+
+    const meshOrLine = child as THREE.Mesh | THREE.Line;
+    if (meshOrLine.geometry && meshOrLine.geometry.attributes?.position) {
+      const posAttr = meshOrLine.geometry.attributes.position;
+      child.updateMatrixWorld(true);
+      for (let i = 0; i < posAttr.count; i++) {
+        const pt = new THREE.Vector3().fromBufferAttribute(posAttr, i);
+        pt.applyMatrix4(child.matrixWorld);
+        points.push(pt);
+      }
+    }
+  });
+
+  if (points.length >= 2) {
+    const marsArrival = points.slice().reverse();
+    marsArrival[0].copy(entryPos);
+    marsArrival[marsArrival.length - 1].copy(restingPos);
+    return {
+      marsPoints: marsArrival,
+      nodeName: foundNodeName || "Camera_Path_Mars",
+    };
+  }
+
+  return {
+    marsPoints: [entryPos.clone(), restingPos.clone()],
+    nodeName: foundNodeName || "Camera_Path_Mars (fallback)",
   };
 }
 
@@ -263,14 +409,17 @@ export function CameraRig({
   onDiagnostic,
 }: CameraRigProps) {
   const { camera } = useThree();
-  const gltf = useGLTF(CAMERA_PATH_URL);
+  const villageGltf = useGLTF(CAMERA_PATH_VILLAGE_URL, DRACO_DECODER_PATH, true);
+  const marsGltf = useGLTF(CAMERA_PATH_MARS_URL, DRACO_DECODER_PATH, true);
 
   // Single continuous progress value along journey: 0.0 = Mountain, 1.0 = Hub Resting
   const progressRef = useRef<number>(0);
   const prevProgressRef = useRef<number>(0);
 
-  // Hub visibility state and resting state
+  // Hub visibility and gradual fade state
   const isHubVisibleRef = useRef<boolean>(false);
+  const maxHubFadeRef = useRef<number>(0);
+  const prevHubFadeRef = useRef<number>(-1);
   const isAtHubRestingRef = useRef<boolean>(false);
   const isTransitioningRef = useRef<boolean>(false);
 
@@ -298,21 +447,29 @@ export function CameraRig({
   const {
     curve,
     departureCurve,
+    marsCurve,
     markers,
     boatVisibilityProgress,
     isFallback,
     vertexCount,
     nodeName,
   } = useMemo(() => {
-    const extractedMarkers = extractMarkers(gltf.scene);
+    const extractedMarkers = extractMarkers(villageGltf.scene, marsGltf.scene);
+    const targetExitPos =
+      extractedMarkers.wormholeEntry ??
+      extractedMarkers.nextArea ??
+      FALLBACK_WORMHOLE_ENTRY;
+
     const {
       journeyPoints,
       departurePoints,
       nodeName: extractedName,
-    } = extractPathPoints(
-      gltf.scene,
-      extractedMarkers.hubResting,
-      extractedMarkers.nextArea ?? FALLBACK_NEXT_AREA
+    } = extractPathPoints(villageGltf.scene, extractedMarkers.hubResting, targetExitPos);
+
+    const { marsPoints } = extractMarsPathPoints(
+      marsGltf.scene,
+      extractedMarkers.marsStationEntry,
+      extractedMarkers.marsStationResting
     );
 
     const hasGlbVertices = journeyPoints.length >= 2;
@@ -323,6 +480,11 @@ export function CameraRig({
     );
     const constructedDepartureCurve = new THREE.CatmullRomCurve3(
       departurePoints,
+      false,
+      "centripetal"
+    );
+    const constructedMarsCurve = new THREE.CatmullRomCurve3(
+      marsPoints,
       false,
       "centripetal"
     );
@@ -343,13 +505,14 @@ export function CameraRig({
     return {
       curve: constructedJourneyCurve,
       departureCurve: constructedDepartureCurve,
+      marsCurve: constructedMarsCurve,
       markers: extractedMarkers,
       boatVisibilityProgress: minP,
       isFallback: !hasGlbVertices,
       vertexCount: journeyPoints.length,
       nodeName: extractedName,
     };
-  }, [gltf.scene]);
+  }, [villageGltf.scene, marsGltf.scene]);
 
   // Report diagnostic to parent
   useEffect(() => {
@@ -549,6 +712,8 @@ export function CameraRig({
       targetScrollVelocityRef.current = 0;
       velocityStateRef.current.scrollVelocity = 0;
       isHubVisibleRef.current = false;
+      maxHubFadeRef.current = 0;
+      prevHubFadeRef.current = -1;
       isAtHubRestingRef.current = false;
       departureAlignRef.current.value = 0;
       departureTravelRef.current.value = 0;
@@ -558,6 +723,12 @@ export function CameraRig({
   // Per-frame physics, kinematics, and orientation update loop
   useFrame((_, delta) => {
     if (!active) return;
+    if (
+      typeof window !== "undefined" &&
+      (window as unknown as { __CAMERA_OVERRIDE__?: boolean }).__CAMERA_OVERRIDE__
+    ) {
+      return;
+    }
 
     // Check if camera has reached Hub Resting
     const isAtEnd = progressRef.current >= 0.999;
@@ -610,21 +781,54 @@ export function CameraRig({
     }
 
     if (typeof window !== "undefined") {
+      (
+        window as unknown as { __SET_CAMERA_PROGRESS__?: (p: number) => void }
+      ).__SET_CAMERA_PROGRESS__ = (p: number) => {
+        progressRef.current = p;
+      };
       (window as unknown as { __CAMERA_DIAGNOSTICS__: unknown }).__CAMERA_DIAGNOSTICS__ =
         {
           progress: progressRef.current,
           isHubVisible: isHubVisibleRef.current,
+          hubFade: maxHubFadeRef.current,
           isAtHubResting: isAtHubRestingRef.current,
           departureAlign: departureAlignRef.current.value,
           departureTravel: departureTravelRef.current.value,
           cameraPosition: camera.position.toArray(),
+          markers: markers.found,
+          journeyLength: curve.getLength(),
+          departureLength: departureCurve.getLength(),
+          marsLength: marsCurve.getLength(),
         };
     }
 
-    // Trigger Hub visibility precisely when camera reaches or crosses the projected Boat Visibility marker.
+    // Gradual Hub appearance: begins revealing at Boat_Visibility and smoothly fades in.
+    // Reaches full opacity within the final 20–25% of the distance between Boat_Visibility and Hub_Resting.
+    // Uses smooth quadratic ease-out curve (t * (2 - t)) for natural visual approach.
     // Once revealed, keep it visible permanently during that visit, including when moving backwards.
-    if (!isHubVisibleRef.current && progressRef.current >= boatVisibilityProgress) {
+    let currentFade = 0;
+    if (progressRef.current >= boatVisibilityProgress) {
+      // Reaches 100% full opacity at 77.5% of the span (leaving final 22.5% distance solid)
+      const fadeEndProgress =
+        boatVisibilityProgress + (1.0 - boatVisibilityProgress) * 0.775;
+      const t = THREE.MathUtils.clamp(
+        (progressRef.current - boatVisibilityProgress) /
+          (fadeEndProgress - boatVisibilityProgress),
+        0,
+        1
+      );
+      // Quadratic ease-out: rapid natural reveal, smooth zero-derivative arrival at 1.0
+      currentFade = t * (2 - t);
+    }
+    maxHubFadeRef.current = Math.max(maxHubFadeRef.current, currentFade);
+    const effectiveFade = maxHubFadeRef.current;
+
+    // Imperative store update without triggering 60 FPS React re-renders
+    hubFadeState.fade = effectiveFade;
+
+    if (!isHubVisibleRef.current && effectiveFade > 0.001) {
       isHubVisibleRef.current = true;
+      hubFadeState.visible = true;
       onHubVisibilityChange?.(true);
     }
 
@@ -737,7 +941,8 @@ export function CameraRig({
   return null;
 }
 
-// Preload the camera path asset
-useGLTF.preload(CAMERA_PATH_URL);
+// Preload camera path assets
+useGLTF.preload(CAMERA_PATH_VILLAGE_URL, DRACO_DECODER_PATH, true);
+useGLTF.preload(CAMERA_PATH_MARS_URL, DRACO_DECODER_PATH, true);
 
 export default CameraRig;
