@@ -15,6 +15,8 @@ import * as THREE from "three";
 import { DRACO_DECODER_PATH, RESEARCH_MODEL_URL } from "./gltfLoaderConfig";
 
 const TRANSLUCENT_MATERIAL_REGEX = /glass|water|ice|stained/i;
+const CUTOUT_MATERIAL_REGEX =
+  /leaves|bars|ladder|cobweb|flower|daisy|dandelion|poppy|grass|lever|sapling|rail/i;
 
 export interface ResearchSceneProps {
   /** Controls WebGL rendering visibility */
@@ -45,9 +47,16 @@ export function ResearchScene({ visible = false, onLoaded }: ResearchSceneProps)
             TRANSLUCENT_MATERIAL_REGEX.test(m.name)
           );
 
+          const isCutoutMesh = materials.some((m) => CUTOUT_MATERIAL_REGEX.test(m.name));
+
           if (isWaterMesh) {
             mesh.castShadow = false;
-            mesh.receiveShadow = false;
+            mesh.receiveShadow = true;
+            mesh.renderOrder = 1;
+          } else if (isTranslucentMesh) {
+            mesh.castShadow = false;
+            mesh.receiveShadow = true;
+            mesh.renderOrder = 2;
           } else {
             mesh.castShadow = true;
             mesh.receiveShadow = true;
@@ -57,17 +66,38 @@ export function ResearchScene({ visible = false, onLoaded }: ResearchSceneProps)
             if (mat instanceof THREE.MeshStandardMaterial) {
               if (mat.map) {
                 mat.map.magFilter = THREE.NearestFilter;
-                mat.map.minFilter = THREE.NearestMipmapNearestFilter;
-                mat.map.generateMipmaps = true;
-                mat.map.needsUpdate = true;
+                mat.map.minFilter = THREE.NearestMipmapLinearFilter;
+                mat.map.colorSpace = THREE.SRGBColorSpace;
+                mat.needsUpdate = true;
               }
 
-              if (isTranslucentMesh) {
+              const matName = mat.name.toLowerCase();
+
+              if (/sea_lantern/i.test(matName)) {
+                // Calibrate sea lantern emission: authentic Minecraft cyan glow without blinding bloom blowout
+                mat.transparent = false;
+                mat.depthWrite = true;
+                mat.emissive = new THREE.Color(0x3a8e9e);
+                mat.emissiveIntensity = 0.35;
+              } else if (isTranslucentMesh || TRANSLUCENT_MATERIAL_REGEX.test(matName)) {
                 mat.transparent = true;
                 mat.opacity = mat.opacity < 1 ? mat.opacity : 0.85;
                 mat.depthWrite = true;
                 mat.side = THREE.FrontSide;
+              } else if (isCutoutMesh || CUTOUT_MATERIAL_REGEX.test(matName)) {
+                // Minecraft cutout foliage, cobwebs, bars
+                mat.transparent = true;
+                mat.alphaTest = 0.5;
+                mat.depthWrite = true;
+              } else {
+                // Crucial fix: Blender exported solid blocks (andesite, stone_bricks, cobblestone,
+                // smooth_stone, dirt, quartz, etc.) with alphaMode: "BLEND". Force transparent = false
+                // and depthWrite = true so solid voxel geometry properly occludes and writes depth!
+                mat.transparent = false;
+                mat.depthWrite = true;
               }
+
+              mat.needsUpdate = true;
             }
           });
         }

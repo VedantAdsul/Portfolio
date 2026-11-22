@@ -126,6 +126,10 @@ export interface WormholeSceneProps {
   marsRigVisible?: boolean;
   /** Whether wormhole rotation/vortex animations should run */
   animate?: boolean;
+  /** Beginning of Mars camera path to align the Mars wormhole exit mouth */
+  marsPathStart?: THREE.Vector3;
+  /** Initial tangent of Mars camera path to align the Mars wormhole exit orientation */
+  marsPathTangent?: THREE.Vector3;
   /** Callback fired once wormhole asset is parsed and rigs are ready */
   onLoaded?: (info: WormholeInfo) => void;
 }
@@ -135,6 +139,8 @@ export function WormholeScene({
   hubRigVisible = true,
   marsRigVisible = false,
   animate = true,
+  marsPathStart,
+  marsPathTangent,
   onLoaded,
 }: WormholeSceneProps) {
   const { scene, animations } = useGLTF(WORMHOLE_MODEL_URL, DRACO_DECODER_PATH, true);
@@ -324,10 +330,60 @@ export function WormholeScene({
       scene.getObjectByName("5th_Dimension_Wormhole_Animated.002") ||
       null;
 
-    marsRigRef.current =
+    let marsRig =
       scene.getObjectByName("5th_Dimension_Wormhole_Animated001") ||
       scene.getObjectByName("5th_Dimension_Wormhole_Animated.001") ||
+      scene.getObjectByName("5th_Dimension_Wormhole_Mars") ||
       null;
+
+    // If only one rig exists in wormhole.glb, clone it to provide the Mars destination wormhole
+    if (!marsRig && hubRigRef.current) {
+      marsRig = hubRigRef.current.clone(true);
+      marsRig.name = "5th_Dimension_Wormhole_Mars";
+      scene.add(marsRig);
+    }
+    marsRigRef.current = marsRig;
+
+    // Position and orient Mars wormhole rig so its exit mouth sits exactly at the beginning
+    // of the Mars camera path, aligned with its initial path orientation
+    if (marsRigRef.current && marsPathStart) {
+      const exitPortal =
+        marsRigRef.current.getObjectByName("Portal_B2003") ||
+        marsRigRef.current.getObjectByName("Portal_B.2003") ||
+        marsRigRef.current.getObjectByName("Wormhole.002") ||
+        marsRigRef.current.getObjectByName("Wormhole002");
+      const throat =
+        marsRigRef.current.getObjectByName("5th_D001") ||
+        marsRigRef.current.getObjectByName("5th_D.001") ||
+        marsRigRef.current.getObjectByName("5th_D002") ||
+        marsRigRef.current.getObjectByName("5th_D.002");
+
+      if (exitPortal && throat) {
+        marsRigRef.current.updateMatrixWorld(true);
+        const currentExitWorld = new THREE.Vector3();
+        exitPortal.getWorldPosition(currentExitWorld);
+        const currentThroatWorld = new THREE.Vector3();
+        throat.getWorldPosition(currentThroatWorld);
+
+        const currentDir = new THREE.Vector3()
+          .subVectors(currentExitWorld, currentThroatWorld)
+          .normalize();
+
+        if (marsPathTangent) {
+          const rotQuat = new THREE.Quaternion().setFromUnitVectors(
+            currentDir,
+            marsPathTangent.clone().normalize()
+          );
+          marsRigRef.current.quaternion.premultiply(rotQuat);
+          marsRigRef.current.updateMatrixWorld(true);
+        }
+
+        exitPortal.getWorldPosition(currentExitWorld);
+        const offset = marsPathStart.clone().sub(currentExitWorld);
+        marsRigRef.current.position.add(offset);
+        marsRigRef.current.updateMatrixWorld(true);
+      }
+    }
 
     // Helper: attach a solid pitch-black singularity blocker disk across the throat (Z = 0)
     // of the wormhole to prevent any line-of-sight background light leakage
@@ -344,11 +400,19 @@ export function WormholeScene({
       }
     };
 
-    // Attach blocker to 5th_D002 (Hub) and 5th_D001 (Mars)
-    const hub5thD = scene.getObjectByName("5th_D002");
-    const mars5thD = scene.getObjectByName("5th_D001");
+    // Attach blocker to 5th_D002 (Hub) and Mars rig throat
+    const hub5thD =
+      scene.getObjectByName("5th_D002") || scene.getObjectByName("5th_D.002");
     ensureSingularityBlocker(hub5thD);
-    ensureSingularityBlocker(mars5thD);
+
+    if (marsRigRef.current) {
+      const mars5thD =
+        marsRigRef.current.getObjectByName("5th_D.002") ||
+        marsRigRef.current.getObjectByName("5th_D002") ||
+        marsRigRef.current.getObjectByName("5th_D001") ||
+        marsRigRef.current.getObjectByName("5th_D.001");
+      ensureSingularityBlocker(mars5thD);
+    }
 
     // Traverse and assign materials strictly preserving geometry and singularity
     scene.traverse((child) => {
@@ -418,9 +482,18 @@ export function WormholeScene({
       hubEntrance: WORMHOLE_HUB_ENTRANCE.clone(),
       hubExit: WORMHOLE_HUB_EXIT.clone(),
       marsEntrance: WORMHOLE_MARS_ENTRANCE.clone(),
-      marsExit: WORMHOLE_MARS_EXIT.clone(),
+      marsExit: marsPathStart ? marsPathStart.clone() : WORMHOLE_MARS_EXIT.clone(),
     });
-  }, [scene, mixer, actions, blackCoreMaterial, tunnelMaterial, onLoaded]);
+  }, [
+    scene,
+    mixer,
+    actions,
+    blackCoreMaterial,
+    tunnelMaterial,
+    marsPathStart,
+    marsPathTangent,
+    onLoaded,
+  ]);
 
   // Synchronize independent rig visibility
   useEffect(() => {

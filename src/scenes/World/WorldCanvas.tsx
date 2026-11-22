@@ -6,7 +6,7 @@
  * temporary development OrbitControls, and modular environment/world scenes.
  */
 
-import { Component, type ReactNode, Suspense, useRef } from "react";
+import { Component, type ReactNode, Suspense, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -29,6 +29,7 @@ export interface WorldCanvasProps {
   fov?: number;
   onJourneyProgress?: (progress: number) => void;
   onJourneyComplete?: () => void;
+  isVillageVisible?: boolean;
   isHubVisible?: boolean;
   hubOpacity?: number;
   onHubVisibilityChange?: (visible: boolean) => void;
@@ -40,6 +41,8 @@ export interface WorldCanvasProps {
   isWormholeVisible?: boolean;
   isMarsVisible?: boolean;
   onMarsVisibilityChange?: (visible: boolean) => void;
+  onTeleportToMars?: () => void;
+  onAtMarsRestingChange?: (atResting: boolean) => void;
 }
 
 interface SceneErrorBoundaryProps {
@@ -99,6 +102,7 @@ export function WorldCanvas({
   fov = DEFAULT_CAMERA_FOV,
   onJourneyProgress,
   onJourneyComplete,
+  isVillageVisible = true,
   isHubVisible = false,
   onHubVisibilityChange,
   onHubFadeChange,
@@ -108,7 +112,13 @@ export function WorldCanvas({
   onNavigateSection,
   isWormholeVisible = true,
   isMarsVisible = false,
+  onTeleportToMars,
+  onAtMarsRestingChange,
 }: WorldCanvasProps) {
+  const [marsPathAlignment, setMarsPathAlignment] = useState<{
+    start: THREE.Vector3;
+    tangent: THREE.Vector3;
+  } | null>(null);
   return (
     <div
       style={{
@@ -156,7 +166,7 @@ export function WorldCanvas({
         <SceneErrorBoundary onError={onError}>
           {/* Primary Suspense boundary: Village and CameraRig load and render first */}
           <Suspense fallback={<WorldFallback />}>
-            <VillageScene />
+            <VillageScene visible={isVillageVisible} />
             <CameraRig
               active={isJourneyActive}
               onProgress={onJourneyProgress}
@@ -167,6 +177,9 @@ export function WorldCanvas({
               onScrollDownAtHub={onScrollDownAtHub}
               activeSection={activeSection}
               onNavigateSection={onNavigateSection}
+              onMarsPathReady={setMarsPathAlignment}
+              onTeleportToMars={onTeleportToMars}
+              onAtMarsRestingChange={onAtMarsRestingChange}
             />
             <SceneReadyWatcher onReady={onSceneReady} />
           </Suspense>
@@ -176,22 +189,26 @@ export function WorldCanvas({
               Remains mounted in the Three.js scene graph with visible={isHubVisible}
               and smoothly fades in from Boat_Visibility to Hub_Resting via opacity prop. */}
           <Suspense fallback={null}>
-            <HubScene visible={isHubVisible} />
+            <HubScene visible={isHubVisible && !isMarsVisible} />
           </Suspense>
 
           {/* Preloaded WormholeScene mounted in its own independent Suspense.
               Loads wormhole.glb and runs vortex rotation animations.
-              Village Hub rig is positioned at the hallway exit. */}
+              Village Hub rig is positioned at the hallway exit; Mars rig aligns with Mars path. */}
           <Suspense fallback={null}>
             <WormholeScene
               visible={isWormholeVisible}
-              hubRigVisible={true}
+              hubRigVisible={isWormholeVisible && !isMarsVisible}
               marsRigVisible={isMarsVisible}
+              marsPathStart={marsPathAlignment?.start}
+              marsPathTangent={marsPathAlignment?.tangent}
             />
           </Suspense>
 
-          {/* Controlled post-processing bloom for cosmic wormhole ribbons */}
-          <WormholeBloom enabled={isWormholeVisible} />
+          {/* High-performance post-processing bloom pipeline kept active continuously.
+              Ensures constant tone mapping, color management, and exposure throughout the entire journey,
+              completely eliminating pipeline-switch hitches or exposure jumps when reaching Hub Resting. */}
+          <WormholeBloom enabled={true} />
 
           {/* Preloaded ResearchScene (Mars Station) mounted in its own independent Suspense.
               Geometry, textures, and shaders are resident in GPU memory before teleportation.

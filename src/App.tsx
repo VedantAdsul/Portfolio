@@ -3,7 +3,7 @@
  * Milestone 1: Clean Foundation & Minecraft-Style Asset Loading Screen
  */
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { LoadingScreen } from "./components/LoadingScreen/LoadingScreen";
 import { WorldCanvas } from "./scenes/World/WorldCanvas";
 import { useActualAssetProgress } from "./hooks/useActualAssetProgress";
@@ -17,14 +17,32 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [isJourneyActive, setIsJourneyActive] = useState<boolean>(false);
+  const [isVillageVisible, setIsVillageVisible] = useState<boolean>(true);
   // Hub starts completely hidden on initial page load until Boat_Visibility marker is crossed
   const [isHubVisible, setIsHubVisible] = useState<boolean>(false);
   const [isAtHubResting, setIsAtHubResting] = useState<boolean>(false);
+  const [hasReachedHubResting, setHasReachedHubResting] = useState<boolean>(false);
   // Mars Research Station starts hidden until wormhole teleportation
   const [isMarsVisible, setIsMarsVisible] = useState<boolean>(false);
-  const [isWormholeVisible] = useState<boolean>(true);
+  const [, setIsAtMarsResting] = useState<boolean>(false);
+
+  // Hub wormhole remains hidden during village journey, becomes visible when camera reaches Hub Resting
+  const isWormholeVisible = hasReachedHubResting;
 
   const { activeSection, goToSection, nextSection } = useSectionNavigation();
+
+  const handleAtHubRestingChange = useCallback((atResting: boolean) => {
+    setIsAtHubResting(atResting);
+    if (atResting) {
+      setHasReachedHubResting(true);
+    }
+  }, []);
+
+  const handleTeleportToMars = useCallback(() => {
+    setIsMarsVisible(true);
+    setIsVillageVisible(false);
+    setIsHubVisible(false);
+  }, []);
 
   // Synchronized with real DOM, font, WebGL, Drei assets, and 3D first-frame render
   const {
@@ -58,15 +76,26 @@ export function App() {
         onSceneReady={() => setIsSceneReady(true)}
         onError={(err) => setSceneError(err.message)}
         isJourneyActive={isJourneyActive}
+        isVillageVisible={isVillageVisible}
         isHubVisible={isHubVisible}
         onHubVisibilityChange={setIsHubVisible}
-        onAtHubRestingChange={setIsAtHubResting}
+        onAtHubRestingChange={handleAtHubRestingChange}
         onScrollDownAtHub={nextSection}
         activeSection={activeSection.id}
-        onNavigateSection={goToSection}
+        onNavigateSection={(sectionId) => {
+          if (sectionId === "home" && isMarsVisible) {
+            setIsMarsVisible(false);
+            setIsVillageVisible(true);
+            setIsHubVisible(true);
+            setIsAtMarsResting(false);
+          }
+          goToSection(sectionId);
+        }}
         isWormholeVisible={isWormholeVisible}
         isMarsVisible={isMarsVisible}
         onMarsVisibilityChange={setIsMarsVisible}
+        onTeleportToMars={handleTeleportToMars}
+        onAtMarsRestingChange={setIsAtMarsResting}
         enableOrbitControls={false}
       />
 

@@ -106,6 +106,12 @@ export interface CameraRigProps {
   activeSection?: SectionId;
   /** Callback to request navigation to a section */
   onNavigateSection?: (section: SectionId) => void;
+  /** Callback when Mars camera path is extracted and ready for wormhole exit alignment */
+  onMarsPathReady?: (info: { start: THREE.Vector3; tangent: THREE.Vector3 }) => void;
+  /** Called when the camera enters the wormhole throat and teleports to Mars */
+  onTeleportToMars?: () => void;
+  /** Called when the camera arrives at the first Mars resting point */
+  onAtMarsRestingChange?: (atResting: boolean) => void;
   /** Diagnostic callback reporting whether markers and raw geometry were present */
   onDiagnostic?: (diagnostic: {
     hasVertices: boolean;
@@ -172,19 +178,13 @@ function extractMarkers(
     marsScene.updateMatrixWorld(true);
     marsScene.traverse((child) => {
       const cleanName = child.name.replace(/_/g, " ").toLowerCase().trim();
-      if (cleanName === "mars station entry" || cleanName.includes("station entry")) {
+      if (cleanName.includes("wormhole exit") || cleanName.includes("station entry")) {
         marsStationEntry = new THREE.Vector3();
         child.getWorldPosition(marsStationEntry);
-      } else if (
-        cleanName === "mars station resting" ||
-        cleanName.includes("station resting")
-      ) {
+      } else if (cleanName.includes("station resting")) {
         marsStationResting = new THREE.Vector3();
         child.getWorldPosition(marsStationResting);
-      } else if (
-        cleanName === "mars camera pointer" ||
-        cleanName.includes("mars camera pointer")
-      ) {
+      } else if (cleanName.includes("camera pointer")) {
         marsCameraPointer = new THREE.Vector3();
         child.getWorldPosition(marsCameraPointer);
       }
@@ -344,12 +344,12 @@ function extractPathPoints(
 
 /**
  * Extracts ordered world-space arrival path points for Mars Research Station.
- * In camera_path_mars.glb: index 48 is Mars_Station_Entry, index 0 is Mars_Station_Resting.
- * Sequences points from Entry -> Resting.
+ * In camera_path_mars.glb: Vertex 180 is at the beginning (near Wormhole_Exit),
+ * and Vertex 0 is at the first resting point (near Mars_Station_Resting_1).
+ * Sequences points from Beginning -> First Resting Point.
  */
 function extractMarsPathPoints(
   scene: THREE.Group,
-  entryPos: THREE.Vector3,
   restingPos: THREE.Vector3
 ): {
   marsPoints: THREE.Vector3[];
@@ -382,8 +382,11 @@ function extractMarsPathPoints(
   });
 
   if (points.length >= 2) {
+    // Vertex 180 is at the beginning; vertex 0 is at the resting point.
+    // Reversing puts index 0 at the beginning of the Mars path, and the last
+    // index at the first Mars resting point.
     const marsArrival = points.slice().reverse();
-    marsArrival[0].copy(entryPos);
+    // Clamp exact arrival end to the resting marker
     marsArrival[marsArrival.length - 1].copy(restingPos);
     return {
       marsPoints: marsArrival,
@@ -392,7 +395,7 @@ function extractMarsPathPoints(
   }
 
   return {
-    marsPoints: [entryPos.clone(), restingPos.clone()],
+    marsPoints: [new THREE.Vector3(-535.48, 170.26, -20.96), restingPos.clone()],
     nodeName: foundNodeName || "Camera_Path_Mars (fallback)",
   };
 }
@@ -406,6 +409,9 @@ export function CameraRig({
   onScrollDownAtHub,
   activeSection = "home",
   onNavigateSection,
+  onMarsPathReady,
+  onTeleportToMars,
+  onAtMarsRestingChange,
   onDiagnostic,
 }: CameraRigProps) {
   const { camera } = useThree();
@@ -423,13 +429,30 @@ export function CameraRig({
   const isAtHubRestingRef = useRef<boolean>(false);
   const isTransitioningRef = useRef<boolean>(false);
 
-  // Departure sequence animation parameters:
+  // Departure and teleportation sequence animation parameters:
   // departureAlign: 0 = looking at Camera Pointer; 1 = aligned with departure path forward tangent
-  // departureTravel: 0 = at Hub Resting; 1 = at Next Area destination
+  // departureTravel: 0 = at Hub Resting; 1 = at wormhole entrance
+  // plungeTravel: 0 = at wormhole entrance; 1 = at wormhole throat void (teleport point)
+  // marsTravel: 0 = emerging from Mars wormhole exit; 1 = at first Mars resting point
   const departureAlignRef = useRef<{ value: number }>({ value: 0 });
   const departureTravelRef = useRef<{ value: number }>({ value: 0 });
+  const plungeTravelRef = useRef<{ value: number }>({ value: 0 });
+  const marsTravelRef = useRef<{ value: number }>({ value: 0 });
+  const isTeleportedRef = useRef<boolean>(false);
+  const isAtMarsRestingRef = useRef<boolean>(false);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
   const currentSectionRef = useRef<SectionId>(activeSection);
+
+  // Keep latest callback references in an effect so GSAP timelines are never interrupted by parent re-renders
+  const onAtHubRestingChangeRef = useRef(onAtHubRestingChange);
+  const onTeleportToMarsRef = useRef(onTeleportToMars);
+  const onAtMarsRestingChangeRef = useRef(onAtMarsRestingChange);
+
+  useEffect(() => {
+    onAtHubRestingChangeRef.current = onAtHubRestingChange;
+    onTeleportToMarsRef.current = onTeleportToMars;
+    onAtMarsRestingChangeRef.current = onAtMarsRestingChange;
+  });
 
   // Velocity state animated via GSAP
   const velocityStateRef = useRef<{ scrollVelocity: number }>({
@@ -468,7 +491,6 @@ export function CameraRig({
 
     const { marsPoints } = extractMarsPathPoints(
       marsGltf.scene,
-      extractedMarkers.marsStationEntry,
       extractedMarkers.marsStationResting
     );
 
@@ -525,7 +547,18 @@ export function CameraRig({
     });
   }, [isFallback, vertexCount, nodeName, markers.found, onDiagnostic]);
 
-  // Animate intentional two-phase transitions between sections (leaving & returning to Hub Resting)
+  // Notify parent of Mars path start and orientation for wormhole exit alignment
+  useEffect(() => {
+    if (marsCurve) {
+      onMarsPathReady?.({
+        start: marsCurve.getPointAt(0),
+        tangent: marsCurve.getTangentAt(0).normalize(),
+      });
+    }
+  }, [marsCurve, onMarsPathReady]);
+
+  // Animate intentional transitions:
+  // Hub Resting -> Hallway -> Wormhole -> Event Horizon Plunge -> Mars Teleport -> Mars Resting
   useEffect(() => {
     if (activeSection === currentSectionRef.current) return;
 
@@ -539,55 +572,88 @@ export function CameraRig({
     const { hubRestingToNextArea } = CAMERA_CONFIG.departureRoutes;
 
     if (activeSection === "home") {
-      // Returning to Hub Resting from secondary section (Workshop / Research)
+      // Returning to Hub Resting
       const tl = gsap.timeline({
         onComplete: () => {
           isTransitioningRef.current = false;
           isAtHubRestingRef.current = true;
-          onAtHubRestingChange?.(true);
+          onAtHubRestingChangeRef.current?.(true);
         },
       });
       timelineRef.current = tl;
 
-      // Phase 1: Retrace departure path backwards back to Hub Resting
-      tl.to(departureTravelRef.current, {
-        value: 0,
-        duration: hubRestingToNextArea.returnTravelDurationSec,
-        ease: hubRestingToNextArea.returnTravelEase,
-      });
+      if (isTeleportedRef.current) {
+        // Reset from Mars back to Hub Resting
+        isTeleportedRef.current = false;
+        isAtMarsRestingRef.current = false;
+        onAtMarsRestingChangeRef.current?.(false);
+        marsTravelRef.current.value = 0;
+        plungeTravelRef.current.value = 0;
+        departureTravelRef.current.value = 0;
+        departureAlignRef.current.value = 0;
+        progressRef.current = 1.0;
+        camera.position.copy(markers.hubResting);
+        camera.lookAt(markers.cameraPointer);
+      } else {
+        // Retrace departure path backwards back to Hub Resting
+        tl.to(departureTravelRef.current, {
+          value: 0,
+          duration: hubRestingToNextArea.returnTravelDurationSec,
+          ease: hubRestingToNextArea.returnTravelEase,
+        });
 
-      // Phase 2: Once safely arrived at Hub Resting, smoothly turn view back to Camera Pointer
-      tl.to(departureAlignRef.current, {
-        value: 0,
-        duration: hubRestingToNextArea.returnAlignmentDurationSec,
-        ease: hubRestingToNextArea.returnAlignmentEase,
-      });
+        tl.to(departureAlignRef.current, {
+          value: 0,
+          duration: hubRestingToNextArea.returnAlignmentDurationSec,
+          ease: hubRestingToNextArea.returnAlignmentEase,
+        });
+      }
     } else {
-      // Leaving Hub Resting towards next section (Workshop / Next Area)
-      // Hide the intro overlay immediately as departure starts
+      // Leaving Hub Resting towards Mars Research Station through the wormhole
       isAtHubRestingRef.current = false;
-      onAtHubRestingChange?.(false);
+      onAtHubRestingChangeRef.current?.(false);
 
       const tl = gsap.timeline({
         onComplete: () => {
           isTransitioningRef.current = false;
+          isAtMarsRestingRef.current = true;
+          onAtMarsRestingChangeRef.current?.(true);
         },
       });
       timelineRef.current = tl;
 
-      // Phase 1: First smoothly rotate/align camera to face the forward-facing exit direction
-      // Camera position remains strictly stationary at Hub Resting during this phase
+      // Phase 1: Smoothly rotate camera view to face down the departure hallway
       tl.to(departureAlignRef.current, {
         value: 1,
         duration: hubRestingToNextArea.alignmentDurationSec,
         ease: hubRestingToNextArea.alignmentEase,
       });
 
-      // Phase 2: Once alignment is complete, begin accelerating along the traced departure path through hallway/stairs
+      // Phase 2: Accelerate along the traced departure path through hallway/stairs to wormhole entrance
       tl.to(departureTravelRef.current, {
         value: 1,
         duration: hubRestingToNextArea.travelDurationSec,
         ease: hubRestingToNextArea.travelEase,
+      });
+
+      // Phase 3: Plunge into the wormhole tunnel towards the pitch-black singularity throat
+      tl.to(plungeTravelRef.current, {
+        value: 1,
+        duration: 1.25,
+        ease: "power2.in",
+      });
+
+      // Phase 4: Teleportation moment concealed inside the 100% pitch-black core void
+      tl.call(() => {
+        isTeleportedRef.current = true;
+        onTeleportToMarsRef.current?.();
+      });
+
+      // Phase 5: Emerging from destination wormhole exit and gliding along Mars camera path
+      tl.to(marsTravelRef.current, {
+        value: 1,
+        duration: 4.8,
+        ease: "power2.out",
       });
     }
 
@@ -596,7 +662,7 @@ export function CameraRig({
         timelineRef.current.kill();
       }
     };
-  }, [activeSection, onAtHubRestingChange]);
+  }, [activeSection, markers.hubResting, markers.cameraPointer, camera]);
 
   // Wheel listener: bidirectional scroll input for forward acceleration and reverse travel
   useEffect(() => {
@@ -717,6 +783,10 @@ export function CameraRig({
       isAtHubRestingRef.current = false;
       departureAlignRef.current.value = 0;
       departureTravelRef.current.value = 0;
+      plungeTravelRef.current.value = 0;
+      marsTravelRef.current.value = 0;
+      isTeleportedRef.current = false;
+      isAtMarsRestingRef.current = false;
     }
   }, [active]);
 
@@ -794,6 +864,10 @@ export function CameraRig({
           isAtHubResting: isAtHubRestingRef.current,
           departureAlign: departureAlignRef.current.value,
           departureTravel: departureTravelRef.current.value,
+          plungeTravel: plungeTravelRef.current.value,
+          marsTravel: marsTravelRef.current.value,
+          isTeleported: isTeleportedRef.current,
+          isAtMarsResting: isAtMarsRestingRef.current,
           cameraPosition: camera.position.toArray(),
           markers: markers.found,
           journeyLength: curve.getLength(),
@@ -840,27 +914,44 @@ export function CameraRig({
       delta
     );
 
-    // Evaluate camera position along the exact continuous Blender curves
+    // Evaluate camera position and orientation along the exact continuous Blender curves
     const journeyPos = curve.getPointAt(progressRef.current);
+    const isTeleported = isTeleportedRef.current;
+    const marsTravel = marsTravelRef.current.value;
+    const plungeTravel = plungeTravelRef.current.value;
     const depTravel = departureTravelRef.current.value;
     const depAlign = departureAlignRef.current.value;
 
     let currentPos: THREE.Vector3;
-    if (depTravel > 0.0001) {
-      // Traveling along the traced departure hallway path (only after alignment is complete)
-      currentPos = departureCurve.getPointAt(depTravel);
-    } else {
-      // Along main journey or stationary at Hub Resting
-      currentPos = journeyPos;
-    }
-    camera.position.copy(currentPos);
-
-    // Determine forward heading and viewing direction target
-    let baseTarget: THREE.Vector3;
     let forwardDir: THREE.Vector3;
+    let baseTarget: THREE.Vector3;
 
-    if (depTravel > 0.0001) {
-      // Moving along departure path
+    if (isTeleported) {
+      // In Mars environment: traveling along Mars camera path
+      currentPos = marsCurve.getPointAt(marsTravel);
+      forwardDir = marsCurve.getTangentAt(marsTravel).normalize();
+
+      const lookAheadT = Math.min(1.0, marsTravel + 0.04);
+      const lookAheadPt = marsCurve.getPointAt(lookAheadT);
+      const curveTarget = lookAheadPt.addScaledVector(forwardDir, 12);
+
+      // Smoothly blend view towards Mars_Camera_Pointer_1 as we arrive at the first resting point
+      const marsLookBlend = THREE.MathUtils.smoothstep(marsTravel, 0.72, 1.0);
+      baseTarget = new THREE.Vector3().lerpVectors(
+        curveTarget,
+        markers.marsCameraPointer,
+        marsLookBlend
+      );
+    } else if (plungeTravel > 0.0001) {
+      // Plunging from wormhole entrance into the pitch-black singularity throat
+      const whEntry = departureCurve.getPointAt(1.0);
+      const whThroat = new THREE.Vector3(-407.8, 26.81, -23.125);
+      currentPos = new THREE.Vector3().lerpVectors(whEntry, whThroat, plungeTravel);
+      forwardDir = new THREE.Vector3().subVectors(whThroat, whEntry).normalize();
+      baseTarget = whThroat.clone().addScaledVector(forwardDir, 10);
+    } else if (depTravel > 0.0001) {
+      // Moving along departure path through hallway
+      currentPos = departureCurve.getPointAt(depTravel);
       const depTangent = departureCurve.getTangentAt(depTravel).normalize();
       forwardDir = depTangent;
       const depLookAheadT = Math.min(1.0, depTravel + 0.035);
@@ -871,6 +962,7 @@ export function CameraRig({
       (isAtHubRestingRef.current && progressRef.current >= 0.99)
     ) {
       // At Hub Resting (stationary position), rotating between Camera Pointer and exit direction
+      currentPos = journeyPos;
       const depStartTangent = departureCurve.getTangentAt(0).normalize();
       forwardDir = depStartTangent;
       const exitLookTarget = journeyPos.clone().addScaledVector(depStartTangent, 15);
@@ -880,7 +972,8 @@ export function CameraRig({
         depAlign
       );
     } else {
-      // Along main journey path
+      // Along main village journey path
+      currentPos = journeyPos;
       const tangent = curve.getTangentAt(progressRef.current);
       forwardDir = tangent.clone().normalize();
 
@@ -905,6 +998,7 @@ export function CameraRig({
         hubLookBlend
       );
     }
+    camera.position.copy(currentPos);
 
     // Calculate lateral mouse look angle without affecting position or roll
     const rawLookForward = baseTarget.clone().sub(currentPos).normalize();

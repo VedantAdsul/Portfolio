@@ -20,6 +20,7 @@ export interface VillageSceneProps {
   position?: [number, number, number];
   rotation?: [number, number, number];
   scale?: number | [number, number, number];
+  visible?: boolean;
   onLoaded?: () => void;
 }
 
@@ -27,6 +28,7 @@ export function VillageScene({
   position = [0, 0, 0],
   rotation = [0, 0, 0],
   scale = 1,
+  visible = true,
   onLoaded,
 }: VillageSceneProps) {
   const { scene } = useGLTF(VILLAGE_MODEL_URL, DRACO_DECODER_PATH);
@@ -100,7 +102,13 @@ export function VillageScene({
   }, [onLoaded]);
 
   return (
-    <primitive object={scene} position={position} rotation={rotation} scale={scale} />
+    <primitive
+      object={scene}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      visible={visible}
+    />
   );
 }
 

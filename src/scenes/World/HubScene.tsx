@@ -51,7 +51,6 @@ export function HubScene({ visible = false, onLoaded }: HubSceneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const managedMaterialsRef = useRef<ManagedMaterialInfo[]>([]);
   const currentFadeRef = useRef<number>(-1);
-  const isFullySolidRef = useRef<boolean | null>(null);
 
   useLayoutEffect(() => {
     scene.updateMatrixWorld(true);
@@ -184,24 +183,10 @@ export function HubScene({ visible = false, onLoaded }: HubSceneProps) {
 
     if (!isRevealed) return;
 
-    // Once fully faded in (>= 0.999), restore solid opacity so only genuinely translucent
-    // materials (water, glass) remain transparent, and all solid voxel blocks become fully opaque
-    const isFullySolid = targetFade >= 0.999;
-    if (isFullySolid !== isFullySolidRef.current) {
-      isFullySolidRef.current = isFullySolid;
-      const mats = managedMaterialsRef.current;
-      for (let i = 0; i < mats.length; i++) {
-        const item = mats[i];
-        if (isFullySolid) {
-          item.material.transparent = item.isTranslucent;
-          item.material.depthWrite = true;
-        } else {
-          item.material.transparent = true;
-          item.material.depthWrite = true;
-        }
-      }
-    }
-
+    // Smoothly update material opacity based on fade progress.
+    // Avoid toggling material.transparent dynamically on solid materials:
+    // With depthWrite: true, materials at opacity 1.0 render crisp solid voxels
+    // without triggering 80+ WebGL shader recompilations or render-queue swaps at resting!
     if (Math.abs(currentFadeRef.current - targetFade) > 0.001) {
       currentFadeRef.current = targetFade;
       const mats = managedMaterialsRef.current;
