@@ -17,8 +17,8 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [isJourneyActive, setIsJourneyActive] = useState<boolean>(false);
-  // STEP 1 FORCED VISIBLE: Hub is visible from the very beginning independently of camera progress
-  const [isHubVisible, setIsHubVisible] = useState<boolean>(true);
+  // Hub starts completely hidden on initial page load until Boat_Visibility marker is crossed
+  const [isHubVisible, setIsHubVisible] = useState<boolean>(false);
   const [isAtHubResting, setIsAtHubResting] = useState<boolean>(false);
 
   const { activeSection, goToSection, nextSection } = useSectionNavigation();

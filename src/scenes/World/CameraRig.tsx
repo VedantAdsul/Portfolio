@@ -39,14 +39,11 @@ import {
   HUB_DEPARTURE_PATH_POINTS,
   TRACED_CAMERA_PATH_POINTS,
 } from "../../data/cameraPathPoints";
+import { CAMERA_CONFIG, getJourneyProgressVelocity } from "../../config/cameraConfig";
 import type { SectionId } from "../../data/sections";
 
 export const CAMERA_PATH_URL = "/assets/world/camera_path.glb";
 export const DEFAULT_CAMERA_FOV = 58;
-export const DEFAULT_BASE_DURATION = 55;
-export const DEFAULT_MAX_FORWARD_BOOST = 0.055;
-export const DEFAULT_MAX_REVERSE_SPEED = 0.045;
-export const DEFAULT_MAX_MOUSE_ANGLE = 0.52; // ~29.8 degrees max yaw
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
@@ -72,14 +69,6 @@ export interface BlenderMarkers {
 export interface CameraRigProps {
   /** Whether the guided camera journey is currently active */
   active?: boolean;
-  /** Journey animation duration at default base speed in seconds (default: 55) */
-  baseDuration?: number;
-  /** Maximum forward velocity boost achievable via scroll down (default: 0.055) */
-  maxForwardBoost?: number;
-  /** Maximum reverse velocity achievable via scroll up (default: 0.045) */
-  maxReverseSpeed?: number;
-  /** Maximum horizontal mouse look angle in radians (default: 0.52, ~30 degrees) */
-  maxMouseAngle?: number;
   /** Called on every frame tick with normalized journey progress [0, 1] */
   onProgress?: (progress: number) => void;
   /** Called when the camera arrives at the Hub destination */
@@ -264,10 +253,6 @@ function extractPathPoints(
 
 export function CameraRig({
   active = true,
-  baseDuration = DEFAULT_BASE_DURATION,
-  maxForwardBoost = DEFAULT_MAX_FORWARD_BOOST,
-  maxReverseSpeed = DEFAULT_MAX_REVERSE_SPEED,
-  maxMouseAngle = DEFAULT_MAX_MOUSE_ANGLE,
   onProgress,
   onComplete,
   onHubVisibilityChange,
@@ -342,10 +327,11 @@ export function CameraRig({
       "centripetal"
     );
 
-    // Calculate progress on the curve corresponding to Boat Visibility
-    let minP = 0.781;
+    // Calculate progress on the curve corresponding to Boat Visibility with sub-millimeter precision
+    let minP = 0.7806;
     let minDist = Infinity;
-    for (let p = 0; p <= 1.0; p += 0.001) {
+    const SAMPLES = 5000;
+    for (let p = 0; p <= 1.0; p += 1.0 / SAMPLES) {
       const pt = constructedJourneyCurve.getPointAt(p);
       const d = pt.distanceTo(extractedMarkers.boatVisibility);
       if (d < minDist) {
@@ -387,6 +373,8 @@ export function CameraRig({
       timelineRef.current.kill();
     }
 
+    const { hubRestingToNextArea } = CAMERA_CONFIG.departureRoutes;
+
     if (activeSection === "home") {
       // Returning to Hub Resting from secondary section (Workshop / Research)
       const tl = gsap.timeline({
@@ -401,15 +389,15 @@ export function CameraRig({
       // Phase 1: Retrace departure path backwards back to Hub Resting
       tl.to(departureTravelRef.current, {
         value: 0,
-        duration: 1.8,
-        ease: "power2.inOut",
+        duration: hubRestingToNextArea.returnTravelDurationSec,
+        ease: hubRestingToNextArea.returnTravelEase,
       });
 
       // Phase 2: Once safely arrived at Hub Resting, smoothly turn view back to Camera Pointer
       tl.to(departureAlignRef.current, {
         value: 0,
-        duration: 0.85,
-        ease: "power2.inOut",
+        duration: hubRestingToNextArea.returnAlignmentDurationSec,
+        ease: hubRestingToNextArea.returnAlignmentEase,
       });
     } else {
       // Leaving Hub Resting towards next section (Workshop / Next Area)
@@ -425,17 +413,18 @@ export function CameraRig({
       timelineRef.current = tl;
 
       // Phase 1: First smoothly rotate/align camera to face the forward-facing exit direction
+      // Camera position remains strictly stationary at Hub Resting during this phase
       tl.to(departureAlignRef.current, {
         value: 1,
-        duration: 0.85,
-        ease: "power2.inOut",
+        duration: hubRestingToNextArea.alignmentDurationSec,
+        ease: hubRestingToNextArea.alignmentEase,
       });
 
-      // Phase 2: Once aligned, begin accelerating along the traced departure path through the hallway/stairs
+      // Phase 2: Once alignment is complete, begin accelerating along the traced departure path through hallway/stairs
       tl.to(departureTravelRef.current, {
         value: 1,
-        duration: 2.2,
-        ease: "power2.inOut",
+        duration: hubRestingToNextArea.travelDurationSec,
+        ease: hubRestingToNextArea.travelEase,
       });
     }
 
@@ -454,28 +443,31 @@ export function CameraRig({
       // Prevent browser default document scroll during guided camera travel
       e.preventDefault();
 
+      // If a section transition is actively animating, ignore wheel inputs
+      if (isTransitioningRef.current) {
+        return;
+      }
+
       // At Hub Resting:
       if (isAtHubRestingRef.current && currentSectionRef.current === "home") {
         if (e.deltaY > 15) {
-          // Scrolling down at Hub Resting triggers intentional transition towards next section
-          if (!isTransitioningRef.current) {
-            isTransitioningRef.current = true;
-            onScrollDownAtHub?.();
-            onNavigateSection?.("project-geofence");
-          }
+          // Scrolling down at Hub Resting triggers intentional departure sequence towards next section
+          isTransitioningRef.current = true;
+          onScrollDownAtHub?.();
+          onNavigateSection?.("project-geofence");
           return;
-        } else if (e.deltaY < -10) {
-          // Scrolling up at Hub Resting begins reverse travel back along curve
-          isAtHubRestingRef.current = false;
-          onAtHubRestingChange?.(false);
+        } else if (e.deltaY < 0 && CAMERA_CONFIG.boundaries.lockReverseAtHubResting) {
+          // TREAT HUB_RESTING AS A NAVIGATION BOUNDARY:
+          // Strictly ignore upward scroll input when resting at Hub.
+          // Do NOT allow the camera to move backwards into the village.
+          return;
         }
+        return;
       } else if (currentSectionRef.current !== "home") {
         if (e.deltaY < -15) {
           // Scrolling up in a secondary section returns to Hub Resting
-          if (!isTransitioningRef.current) {
-            isTransitioningRef.current = true;
-            onNavigateSection?.("home");
-          }
+          isTransitioningRef.current = true;
+          onNavigateSection?.("home");
           return;
         }
       }
@@ -483,21 +475,21 @@ export function CameraRig({
       // Normalize delta across continuous trackpads and stepped mouse wheels
       const sign = Math.sign(e.deltaY);
       const magnitude = Math.min(Math.abs(e.deltaY), 80);
-      const impulse = sign * magnitude * 0.00045;
+      const impulse = sign * magnitude * CAMERA_CONFIG.scrollDynamics.scrollSensitivity;
 
       // Accumulate target scroll velocity:
-      // Positive deltaY (scroll down) accelerates forward up to maxForwardBoost
-      // Negative deltaY (scroll up) accelerates in reverse down to -maxReverseSpeed
+      // Positive deltaY (scroll down) accelerates forward up to maxForwardBoostProgress
+      // Negative deltaY (scroll up) accelerates in reverse down to -maxReverseSpeedProgress
       targetScrollVelocityRef.current = THREE.MathUtils.clamp(
         targetScrollVelocityRef.current + impulse,
-        -maxReverseSpeed,
-        maxForwardBoost
+        -CAMERA_CONFIG.scrollDynamics.maxReverseSpeedProgress,
+        CAMERA_CONFIG.scrollDynamics.maxForwardBoostProgress
       );
 
       // Smoothly transition scroll velocity using GSAP
       gsap.to(velocityStateRef.current, {
         scrollVelocity: targetScrollVelocityRef.current,
-        duration: 0.22,
+        duration: CAMERA_CONFIG.scrollDynamics.accelerationDurationSec,
         ease: "power1.out",
         overwrite: "auto",
       });
@@ -506,16 +498,16 @@ export function CameraRig({
         clearTimeout(decelTimeoutRef.current);
       }
 
-      // When scrolling stops (160ms of inactivity), smoothly ease scroll velocity to 0
+      // When scrolling stops, smoothly ease scroll velocity to 0
       decelTimeoutRef.current = setTimeout(() => {
         targetScrollVelocityRef.current = 0;
         gsap.to(velocityStateRef.current, {
           scrollVelocity: 0,
-          duration: 1.4,
+          duration: CAMERA_CONFIG.scrollDynamics.decelerationDurationSec,
           ease: "power2.out",
           overwrite: "auto",
         });
-      }, 160);
+      }, CAMERA_CONFIG.scrollDynamics.inactivityTimeoutMs);
     };
 
     window.addEventListener("wheel", handleWheel, { passive: false });
@@ -526,14 +518,7 @@ export function CameraRig({
         clearTimeout(decelTimeoutRef.current);
       }
     };
-  }, [
-    active,
-    maxForwardBoost,
-    maxReverseSpeed,
-    onScrollDownAtHub,
-    onNavigateSection,
-    onAtHubRestingChange,
-  ]);
+  }, [active, onScrollDownAtHub, onNavigateSection, onAtHubRestingChange]);
 
   // Mouse move listener: horizontal look influence
   useEffect(() => {
@@ -587,39 +572,19 @@ export function CameraRig({
       onComplete?.();
     }
 
-    // Match movement speed across open water bay to village camera movement:
-    // Scale velocity across open water so it feels brisk and consistent with village streets,
-    // then smoothly ease as the camera docks at Hub Resting.
-    let waterSpeedMultiplier = 1.0;
-    if (progressRef.current >= boatVisibilityProgress) {
-      const waterSpan = 1.0 - boatVisibilityProgress;
-      const waterProgress = THREE.MathUtils.clamp(
-        (progressRef.current - boatVisibilityProgress) / waterSpan,
-        0,
-        1
-      );
-      if (waterProgress < 0.75) {
-        waterSpeedMultiplier = THREE.MathUtils.lerp(
-          1.0,
-          1.95,
-          Math.min(1, waterProgress * 3.0)
-        );
-      } else {
-        waterSpeedMultiplier = THREE.MathUtils.lerp(
-          1.95,
-          1.0,
-          (waterProgress - 0.75) / 0.25
-        );
-      }
-    }
-
-    // When resting at Hub, autonomous movement pauses (baseVelocity = 0)
-    const baseVelocity = isAtHubRestingRef.current
+    // Autonomous progress velocity (du/dt) derived from centralized CAMERA_CONFIG speeds
+    const totalCurveLength = curve.getLength();
+    const baseProgressVelocity = isAtHubRestingRef.current
       ? 0
-      : (1.0 / baseDuration) * waterSpeedMultiplier;
-    const scrollMultiplier = progressRef.current >= boatVisibilityProgress ? 1.5 : 1.0;
+      : getJourneyProgressVelocity(progressRef.current, totalCurveLength);
+
+    const isOnWater = progressRef.current >= boatVisibilityProgress;
+    const scrollMultiplier = isOnWater
+      ? CAMERA_CONFIG.scrollDynamics.waterScrollMultiplier
+      : 1.0;
+
     const currentVelocity =
-      baseVelocity + velocityStateRef.current.scrollVelocity * scrollMultiplier;
+      baseProgressVelocity + velocityStateRef.current.scrollVelocity * scrollMultiplier;
 
     // Integrate progress along the path (clamped strictly between 0 and 1)
     progressRef.current = THREE.MathUtils.clamp(
@@ -628,8 +593,12 @@ export function CameraRig({
       1
     );
 
-    // If camera reversed before the end, clear resting state
-    if (progressRef.current < 0.985 && isAtHubRestingRef.current) {
+    // If camera reversed before the end (only possible if lockReverse is disabled), clear resting state
+    if (
+      progressRef.current < 0.985 &&
+      isAtHubRestingRef.current &&
+      !CAMERA_CONFIG.boundaries.lockReverseAtHubResting
+    ) {
       isAtHubRestingRef.current = false;
       onAtHubRestingChange?.(false);
     }
@@ -652,12 +621,9 @@ export function CameraRig({
         };
     }
 
-    // Trigger Hub visibility precisely when camera reaches Boat Visibility marker.
-    // Once revealed, keep it visible even when scrolling backwards.
-    if (
-      !isHubVisibleRef.current &&
-      progressRef.current >= boatVisibilityProgress - 0.002
-    ) {
+    // Trigger Hub visibility precisely when camera reaches or crosses the projected Boat Visibility marker.
+    // Once revealed, keep it visible permanently during that visit, including when moving backwards.
+    if (!isHubVisibleRef.current && progressRef.current >= boatVisibilityProgress) {
       isHubVisibleRef.current = true;
       onHubVisibilityChange?.(true);
     }
@@ -666,7 +632,7 @@ export function CameraRig({
     smoothedMouseXRef.current = THREE.MathUtils.damp(
       smoothedMouseXRef.current,
       rawMouseXRef.current,
-      3.8,
+      CAMERA_CONFIG.orientationDynamics.mouseLookDamping,
       delta
     );
 
@@ -677,7 +643,7 @@ export function CameraRig({
 
     let currentPos: THREE.Vector3;
     if (depTravel > 0.0001) {
-      // Traveling along the traced departure hallway path (no wall clipping)
+      // Traveling along the traced departure hallway path (only after alignment is complete)
       currentPos = departureCurve.getPointAt(depTravel);
     } else {
       // Along main journey or stationary at Hub Resting
@@ -743,7 +709,8 @@ export function CameraRig({
     const lookRight = new THREE.Vector3().crossVectors(lookForward, WORLD_UP).normalize();
 
     // Yaw rotation offset: positive mouseX turns view right relative to forward path heading
-    const lookAngle = smoothedMouseXRef.current * maxMouseAngle;
+    const lookAngle =
+      smoothedMouseXRef.current * CAMERA_CONFIG.orientationDynamics.maxMouseLookAngleRad;
     const finalLookDir = lookForward
       .clone()
       .multiplyScalar(Math.cos(lookAngle))
@@ -760,7 +727,10 @@ export function CameraRig({
       camera.quaternion.copy(targetQuat);
       isInitializedRef.current = true;
     } else {
-      camera.quaternion.slerp(targetQuat, Math.min(1, 8.5 * delta));
+      camera.quaternion.slerp(
+        targetQuat,
+        Math.min(1, CAMERA_CONFIG.orientationDynamics.cameraRotationDamping * delta)
+      );
     }
   });
 
