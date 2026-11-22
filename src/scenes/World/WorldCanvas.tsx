@@ -12,8 +12,10 @@ import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import { WorldEnvironment } from "./WorldEnvironment";
 import { VillageScene } from "./VillageScene";
+import { HubScene } from "./HubScene";
 import { WorldFallback } from "./WorldFallback";
 import { CameraRig, DEFAULT_CAMERA_FOV } from "./CameraRig";
+import type { SectionId } from "../../data/sections";
 
 export interface WorldCanvasProps {
   onCreated?: () => void;
@@ -24,6 +26,12 @@ export interface WorldCanvasProps {
   fov?: number;
   onJourneyProgress?: (progress: number) => void;
   onJourneyComplete?: () => void;
+  isHubVisible?: boolean;
+  onHubVisibilityChange?: (visible: boolean) => void;
+  onAtHubRestingChange?: (atResting: boolean) => void;
+  onScrollDownAtHub?: () => void;
+  activeSection?: SectionId;
+  onNavigateSection?: (section: SectionId) => void;
 }
 
 interface SceneErrorBoundaryProps {
@@ -83,6 +91,12 @@ export function WorldCanvas({
   fov = DEFAULT_CAMERA_FOV,
   onJourneyProgress,
   onJourneyComplete,
+  isHubVisible = false,
+  onHubVisibilityChange,
+  onAtHubRestingChange,
+  onScrollDownAtHub,
+  activeSection = "home",
+  onNavigateSection,
 }: WorldCanvasProps) {
   return (
     <div
@@ -119,14 +133,28 @@ export function WorldCanvas({
 
         {/* Async loaded voxel world with ErrorBoundary and Suspense */}
         <SceneErrorBoundary onError={onError}>
+          {/* Primary Suspense boundary: Village and CameraRig load and render first */}
           <Suspense fallback={<WorldFallback />}>
             <VillageScene />
             <CameraRig
               active={isJourneyActive}
               onProgress={onJourneyProgress}
               onComplete={onJourneyComplete}
+              onHubVisibilityChange={onHubVisibilityChange}
+              onAtHubRestingChange={onAtHubRestingChange}
+              onScrollDownAtHub={onScrollDownAtHub}
+              activeSection={activeSection}
+              onNavigateSection={onNavigateSection}
             />
             <SceneReadyWatcher onReady={onSceneReady} />
+          </Suspense>
+
+          {/* Preloaded HubScene mounted in its own independent Suspense.
+              Loads in advance in the background without blocking initial Village render.
+              Remains mounted in the Three.js scene graph with visible={isHubVisible}
+              so visibility toggles instantaneously at the boat marker with zero re-decoding. */}
+          <Suspense fallback={null}>
+            <HubScene visible={isHubVisible} />
           </Suspense>
         </SceneErrorBoundary>
 

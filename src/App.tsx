@@ -7,6 +7,9 @@ import { useState } from "react";
 import { LoadingScreen } from "./components/LoadingScreen/LoadingScreen";
 import { WorldCanvas } from "./scenes/World/WorldCanvas";
 import { useActualAssetProgress } from "./hooks/useActualAssetProgress";
+import { useSectionNavigation } from "./hooks/useSectionNavigation";
+import { Navigation } from "./components/Navigation/Navigation";
+import { HubIntro } from "./components/HubIntro";
 
 export function App() {
   const [isCanvasReady, setIsCanvasReady] = useState<boolean>(false);
@@ -14,6 +17,11 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [isJourneyActive, setIsJourneyActive] = useState<boolean>(false);
+  // STEP 1 FORCED VISIBLE: Hub is visible from the very beginning independently of camera progress
+  const [isHubVisible, setIsHubVisible] = useState<boolean>(true);
+  const [isAtHubResting, setIsAtHubResting] = useState<boolean>(false);
+
+  const { activeSection, goToSection, nextSection } = useSectionNavigation();
 
   // Synchronized with real DOM, font, WebGL, Drei assets, and 3D first-frame render
   const {
@@ -47,7 +55,13 @@ export function App() {
         onSceneReady={() => setIsSceneReady(true)}
         onError={(err) => setSceneError(err.message)}
         isJourneyActive={isJourneyActive}
-        onJourneyComplete={() => setIsJourneyActive(false)}
+        isHubVisible={isHubVisible}
+        onHubVisibilityChange={setIsHubVisible}
+        onAtHubRestingChange={setIsAtHubResting}
+        onScrollDownAtHub={nextSection}
+        activeSection={activeSection.id}
+        onNavigateSection={goToSection}
+        enableOrbitControls={false}
       />
 
       {/* Brand Header */}
@@ -74,6 +88,23 @@ export function App() {
           VEDANT.EXE
         </span>
       </header>
+
+      {/* Navigation Bar */}
+      {!isLoading && (
+        <Navigation
+          activeId={activeSection.id}
+          onNavigate={(id) => {
+            goToSection(id);
+          }}
+        />
+      )}
+
+      {/* Introductory Portfolio Overlay at Hub Resting */}
+      <HubIntro
+        visible={isAtHubResting && activeSection.id === "home" && !isLoading}
+        onExploreWorkshop={nextSection}
+        onViewResearch={() => goToSection("research")}
+      />
 
       {/* Minecraft Java Edition World Generation Loading Screen */}
       {isLoading && (
