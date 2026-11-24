@@ -175,6 +175,7 @@ export function WormholeScene({
         color: 0x000000,
         side: THREE.DoubleSide,
         depthWrite: true,
+        clippingPlanes: [],
       }),
     []
   );
@@ -194,6 +195,7 @@ export function WormholeScene({
       side: THREE.DoubleSide,
       depthWrite: true,
       transparent: false,
+      clippingPlanes: [],
     });
 
     mat.onBeforeCompile = (shader) => {
@@ -344,44 +346,64 @@ export function WormholeScene({
     }
     marsRigRef.current = marsRig;
 
-    // Position and orient Mars wormhole rig so its exit mouth sits exactly at the beginning
-    // of the Mars camera path, aligned with its initial path orientation
-    if (marsRigRef.current && marsPathStart) {
-      const exitPortal =
-        marsRigRef.current.getObjectByName("Portal_B2003") ||
-        marsRigRef.current.getObjectByName("Portal_B.2003") ||
-        marsRigRef.current.getObjectByName("Wormhole.002") ||
-        marsRigRef.current.getObjectByName("Wormhole002");
-      const throat =
-        marsRigRef.current.getObjectByName("5th_D001") ||
-        marsRigRef.current.getObjectByName("5th_D.001") ||
-        marsRigRef.current.getObjectByName("5th_D002") ||
-        marsRigRef.current.getObjectByName("5th_D.002");
+    // Position and orient Mars wormhole rig so its entrance sits exactly on the platform,
+    // upright and directly facing the approaching camera along the Mars camera path trajectory
+    if (marsRigRef.current) {
+      const marsRig = marsRigRef.current;
+      const mThroat =
+        marsRig.getObjectByName("5th_D.002") ||
+        marsRig.getObjectByName("5th_D002") ||
+        marsRig.getObjectByName("5th_D.001") ||
+        marsRig.getObjectByName("5th_D001");
+      const mVortex =
+        marsRig.getObjectByName("Vortex.002") || marsRig.getObjectByName("Vortex002");
 
-      if (exitPortal && throat) {
-        marsRigRef.current.updateMatrixWorld(true);
-        const currentExitWorld = new THREE.Vector3();
-        exitPortal.getWorldPosition(currentExitWorld);
-        const currentThroatWorld = new THREE.Vector3();
-        throat.getWorldPosition(currentThroatWorld);
+      if (mThroat && mVortex) {
+        // Target mouth position on the platform where vertex 132 / Wormhole Exit sits
+        const targetMouthPos =
+          marsPathStart?.clone() ?? new THREE.Vector3(-535.702, 169.187, -21.004);
 
-        const currentDir = new THREE.Vector3()
-          .subVectors(currentExitWorld, currentThroatWorld)
-          .normalize();
+        // Direction from which the camera approaches the mouth on the wrap-around path:
+        // Strictly horizontal along the station platform to match camera arrival trajectory:
+        const approachDir = new THREE.Vector3(0.99086, 0.02727, -0.13211).normalize();
 
-        if (marsPathTangent) {
-          const rotQuat = new THREE.Quaternion().setFromUnitVectors(
-            currentDir,
-            marsPathTangent.clone().normalize()
-          );
-          marsRigRef.current.quaternion.premultiply(rotQuat);
-          marsRigRef.current.updateMatrixWorld(true);
-        }
+        const targetMouthNormal = approachDir.clone().negate();
+        const worldUp = new THREE.Vector3(0, 1, 0);
 
-        exitPortal.getWorldPosition(currentExitWorld);
-        const offset = marsPathStart.clone().sub(currentExitWorld);
-        marsRigRef.current.position.add(offset);
-        marsRigRef.current.updateMatrixWorld(true);
+        // Basis where Z is the tunnel axis facing outward from mouth towards Mars
+        const zAxis = targetMouthNormal.clone().normalize();
+        const xAxis = new THREE.Vector3().crossVectors(worldUp, zAxis).normalize();
+        const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+
+        const desiredThroatMat = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+        const desiredThroatQuat = new THREE.Quaternion().setFromRotationMatrix(
+          desiredThroatMat
+        );
+
+        // Cylinder mouth is 5.6 units along Z in local space; scaled by 3.932481 -> 22.022m
+        const rigScale = 3.932481;
+        const tunnelLength = 5.6 * rigScale;
+        const desiredThroatPos = targetMouthPos
+          .clone()
+          .addScaledVector(approachDir, tunnelLength);
+
+        mVortex.updateMatrix();
+        mThroat.updateMatrix();
+        const L = new THREE.Matrix4().multiplyMatrices(mVortex.matrix, mThroat.matrix);
+
+        const desiredThroatWorldMatrix = new THREE.Matrix4().compose(
+          desiredThroatPos,
+          desiredThroatQuat,
+          new THREE.Vector3(rigScale, rigScale, rigScale)
+        );
+        const L_inv = L.clone().invert();
+        const marsRigWorldMatrix = new THREE.Matrix4().multiplyMatrices(
+          desiredThroatWorldMatrix,
+          L_inv
+        );
+
+        marsRigWorldMatrix.decompose(marsRig.position, marsRig.quaternion, marsRig.scale);
+        marsRig.updateMatrixWorld(true);
       }
     }
 
@@ -391,11 +413,12 @@ export function WormholeScene({
       if (!parent) return;
       const existing = parent.getObjectByName("SingularityBlocker");
       if (!existing) {
-        const blockerGeom = new THREE.CircleGeometry(0.35, 32);
+        const blockerGeom = new THREE.CircleGeometry(2.5, 32);
         const blocker = new THREE.Mesh(blockerGeom, blackCoreMaterial);
         blocker.name = "SingularityBlocker";
         blocker.position.set(0, 0, 0);
         blocker.renderOrder = 10;
+        blocker.frustumCulled = false;
         parent.add(blocker);
       }
     };
@@ -430,6 +453,7 @@ export function WormholeScene({
 
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
+        mesh.frustumCulled = false;
         const mat = mesh.material;
         const matName = Array.isArray(mat)
           ? mat.map((m) => m.name.toLowerCase()).join(" ")

@@ -145,10 +145,12 @@ export function WorldCanvas({
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: 1.1,
           preserveDrawingBuffer: true,
+          localClippingEnabled: true,
         }}
         dpr={[1, 1.5]}
         shadows={{ type: THREE.PCFSoftShadowMap }}
         onCreated={(state) => {
+          state.gl.localClippingEnabled = true;
           if (typeof window !== "undefined") {
             (window as unknown as { __THREE_SCENE__: THREE.Scene }).__THREE_SCENE__ =
               state.scene;

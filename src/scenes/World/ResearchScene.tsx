@@ -18,6 +18,21 @@ const TRANSLUCENT_MATERIAL_REGEX = /glass|water|ice|stained/i;
 const CUTOUT_MATERIAL_REGEX =
   /leaves|bars|ladder|cobweb|flower|daisy|dandelion|poppy|grass|lever|sapling|rail/i;
 
+// Hardware portal clipping plane:
+// Clips any voxel blocks behind the Mars wormhole mouth plane (X > -535.702) that would
+// otherwise penetrate into the hollow 3D wormhole cylinder and block the camera's view of the singularity.
+const MARS_WORMHOLE_MOUTH = new THREE.Vector3(-535.702, 169.187, -21.004);
+const MARS_WORMHOLE_APPROACH_DIR = new THREE.Vector3(
+  0.99086,
+  0.02727,
+  -0.13211
+).normalize();
+const MARS_PORTAL_PLANE_NORMAL = MARS_WORMHOLE_APPROACH_DIR.clone().negate();
+const MARS_PORTAL_CLIPPING_PLANE = new THREE.Plane().setFromNormalAndCoplanarPoint(
+  MARS_PORTAL_PLANE_NORMAL,
+  MARS_WORMHOLE_MOUTH
+);
+
 export interface ResearchSceneProps {
   /** Controls WebGL rendering visibility */
   visible?: boolean;
@@ -63,6 +78,9 @@ export function ResearchScene({ visible = false, onLoaded }: ResearchSceneProps)
           }
 
           materials.forEach((mat) => {
+            mat.clippingPlanes = [MARS_PORTAL_CLIPPING_PLANE];
+            mat.clipShadows = true;
+
             if (mat instanceof THREE.MeshStandardMaterial) {
               if (mat.map) {
                 mat.map.magFilter = THREE.NearestFilter;
@@ -79,25 +97,6 @@ export function ResearchScene({ visible = false, onLoaded }: ResearchSceneProps)
                 mat.depthWrite = true;
                 mat.emissive = new THREE.Color(0x3a8e9e);
                 mat.emissiveIntensity = 0.35;
-              } else if (/iron_block/i.test(matName)) {
-                // Correct iron block material in isolation:
-                // Blender glTF exported iron_block with default metallicFactor = 1.0 and specularFactor = 0,
-                // which completely absorbs diffuse light and makes the block appear abnormally dark.
-                // Reset metalness to 0.0 and roughness to 0.55 so the authentic light-gray Minecraft texture
-                // scatters standard diffuse light identically to the rest of the voxel world.
-                mat.transparent = false;
-                mat.depthWrite = true;
-                mat.metalness = 0.0;
-                mat.roughness = 0.55;
-                if ("specularIntensity" in mat) {
-                  (mat as unknown as { specularIntensity: number }).specularIntensity =
-                    0.4;
-                }
-                if ("specularColor" in mat) {
-                  (mat as unknown as { specularColor: THREE.Color }).specularColor.setHex(
-                    0xffffff
-                  );
-                }
               } else if (/iron_block/i.test(matName)) {
                 // Correct iron block material in isolation:
                 // Blender glTF exported iron_block with default metallicFactor = 1.0 and specularFactor = 0,

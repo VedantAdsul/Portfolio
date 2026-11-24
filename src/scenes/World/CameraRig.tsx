@@ -66,9 +66,10 @@ const FALLBACK_MARS_CAMERA_POINTER_3 = new THREE.Vector3(-624.1622, 177.3324, -2
 // Mars Camera Path U parameter values for each resting point
 const MARS_RESTING_U = {
   EXIT: 0.0,
-  RESTING_1: 0.5692,
-  RESTING_2: 0.8194,
-  RESTING_3: 1.0,
+  RESTING_1: 0.2728,
+  RESTING_2: 0.3928,
+  RESTING_3: 0.4784,
+  WORMHOLE_APPROACH: 1.0,
 };
 
 export interface BlenderMarkers {
@@ -404,11 +405,12 @@ function extractPathPoints(
  * Extracts ordered world-space path points for Mars Research Station.
  * In camera_path_mars.glb:
  * - Total vertices: 427.
- * - Vertices 426 down to 212 form the continuous forward path (215 vertices):
+ * - Vertices 426 down to 132 form the complete continuous forward path (295 vertices, 274.45m):
  *   Vertex 426 is Wormhole Exit ([-535.48, 170.26, -20.96], u = 0.0)
- *   Vertex 258 is Resting 1 ([-598.80, 151.62, -26.47], u1 = 0.5692)
- *   Vertex 229 is Resting 2 ([-617.89, 165.26, -46.66], u2 = 0.8194)
- *   Vertex 212 is Resting 3 ([-639.49, 162.62, -37.70], u3 = 1.0)
+ *   Vertex 258 is Resting 1 ([-598.80, 151.62, -26.47], u1 = 0.2728)
+ *   Vertex 229 is Resting 2 ([-617.89, 165.26, -46.66], u2 = 0.3928)
+ *   Vertex 212 is Resting 3 ([-639.49, 162.62, -37.70], u3 = 0.4784)
+ *   Vertices 211 down to 132 wrap around the station to Mars Wormhole Entrance ([-535.70, 169.19, -21.00], u4 = 1.0)
  */
 function extractMarsPathPoints(scene: THREE.Group): {
   marsPoints: THREE.Vector3[];
@@ -440,8 +442,8 @@ function extractMarsPathPoints(scene: THREE.Group): {
     }
   });
 
-  if (points.length >= 215) {
-    const marsPoints = points.slice(212, 427).reverse();
+  if (points.length >= 295) {
+    const marsPoints = points.slice(132, 427).reverse();
     return {
       marsPoints,
       nodeName: foundNodeName || "Camera_Path_Mars",
@@ -454,6 +456,7 @@ function extractMarsPathPoints(scene: THREE.Group): {
       FALLBACK_MARS_STATION_RESTING_1.clone(),
       FALLBACK_MARS_STATION_RESTING_2.clone(),
       FALLBACK_MARS_STATION_RESTING_3.clone(),
+      new THREE.Vector3(-535.7, 169.19, -21.0),
     ],
     nodeName: foundNodeName || "Camera_Path_Mars (fallback)",
   };
@@ -472,7 +475,7 @@ function getMarsLookTarget(
   p2: THREE.Vector3,
   p3: THREE.Vector3
 ): THREE.Vector3 {
-  const { RESTING_1, RESTING_2, RESTING_3 } = MARS_RESTING_U;
+  const { RESTING_1, RESTING_2, RESTING_3, WORMHOLE_APPROACH } = MARS_RESTING_U;
 
   if (u <= RESTING_1) {
     const lookAheadT = Math.min(RESTING_1, u + 0.04);
@@ -480,16 +483,31 @@ function getMarsLookTarget(
     const tangent = curve.getTangentAt(u).normalize();
     const curveTarget = lookAheadPt.addScaledVector(tangent, 15);
 
-    const blend = THREE.MathUtils.smoothstep(u, 0.35, RESTING_1);
+    const blend = THREE.MathUtils.smoothstep(u, 0.15, RESTING_1);
     return new THREE.Vector3().lerpVectors(curveTarget, p1, blend);
   } else if (u <= RESTING_2) {
     const t = (u - RESTING_1) / (RESTING_2 - RESTING_1);
     const blend = THREE.MathUtils.smoothstep(t, 0, 1);
     return new THREE.Vector3().lerpVectors(p1, p2, blend);
-  } else {
-    const t = THREE.MathUtils.clamp((u - RESTING_2) / (RESTING_3 - RESTING_2), 0, 1);
+  } else if (u <= RESTING_3) {
+    const t = (u - RESTING_2) / (RESTING_3 - RESTING_2);
     const blend = THREE.MathUtils.smoothstep(t, 0, 1);
     return new THREE.Vector3().lerpVectors(p2, p3, blend);
+  } else {
+    // Wrap-around along research station perimeter leading to Mars wormhole entrance
+    const t = THREE.MathUtils.clamp(
+      (u - RESTING_3) / (WORMHOLE_APPROACH - RESTING_3),
+      0,
+      1
+    );
+    const lookAheadT = Math.min(1.0, u + 0.04);
+    const lookAheadPt = curve.getPointAt(lookAheadT);
+    const tangent = curve.getTangentAt(u).normalize();
+    const curveTarget = lookAheadPt.addScaledVector(tangent, 15);
+
+    // Smoothly transition from looking at Pointer 3 to tracking ahead along curve towards wormhole
+    const blend = THREE.MathUtils.smoothstep(t, 0, 0.25);
+    return new THREE.Vector3().lerpVectors(p3, curveTarget, blend);
   }
 }
 
@@ -511,6 +529,36 @@ export function CameraRig({
   const { camera } = useThree();
   const villageGltf = useGLTF(CAMERA_PATH_VILLAGE_URL, DRACO_DECODER_PATH, true);
   const marsGltf = useGLTF(CAMERA_PATH_MARS_URL, DRACO_DECODER_PATH, true);
+
+  // Fullscreen event horizon blackout plane attached directly to camera:
+  // Guarantees 100% concealment of the environment switch when plunging into the singularity core
+  // in both forward and reverse navigation directions, with zero 180° camera flip.
+  const eventHorizonPlane = useMemo(() => {
+    const geom = new THREE.PlaneGeometry(10, 10);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.name = "EventHorizonBlackout";
+    mesh.renderOrder = 99999;
+    mesh.frustumCulled = false;
+    mesh.visible = false;
+    mesh.position.set(0, 0, -0.15);
+    return mesh;
+  }, []);
+
+  useEffect(() => {
+    camera.add(eventHorizonPlane);
+    return () => {
+      camera.remove(eventHorizonPlane);
+      eventHorizonPlane.geometry.dispose();
+      (eventHorizonPlane.material as THREE.Material).dispose();
+    };
+  }, [camera, eventHorizonPlane]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -648,7 +696,7 @@ export function CameraRig({
     if (marsCurve) {
       onMarsPathReady?.({
         start: marsCurve.getPointAt(0),
-        tangent: marsCurve.getTangentAt(0).normalize(),
+        tangent: marsCurve.getTangentAt(1.0).normalize(),
       });
     }
   }, [marsCurve, onMarsPathReady]);
@@ -671,13 +719,11 @@ export function CameraRig({
       if (isTeleportedRef.current) {
         // REVERSE WORMHOLE TELEPORTATION FROM MARS TO HUB:
         // 1. Fast rewind from current Mars position along marsCurve to wormhole exit (u = 0.0)
-        // 2. Plunge into Mars wormhole throat void (100% black singularity)
-        // 3. Concealed environment switch inside the pitch-black core
+        // 2. Plunge into Mars wormhole throat void (facing forward out towards Mars scenery, no 180° flip)
+        // 3. Concealed environment switch inside the pitch-black singularity core
         // 4. Emerge out of Hub wormhole mouth into hallway
-        // 5. Retrace hallway back to Hub Resting
-        // 6. Smoothly re-align view with Camera Pointer
+        // 5. Retrace hallway back to Hub Resting while smoothly re-aligning with Camera Pointer
         const currentMarsU = marsTravelRef.current.value;
-        const rewindDuration = Math.max(0.6, currentMarsU * 1.2);
 
         const tl = gsap.timeline({
           onComplete: () => {
@@ -688,21 +734,36 @@ export function CameraRig({
         });
         timelineRef.current = tl;
 
-        // Phase 1: Fast rewind to Mars wormhole exit if not already there
-        if (currentMarsU > 0.01) {
-          tl.to(marsTravelRef.current, {
-            value: 0,
-            duration: rewindDuration,
-            ease: "power2.inOut",
+        if (currentMarsU >= 0.9) {
+          // At or near wormhole entrance: plunge straight forward into singularity core
+          tl.to(plungeTravelRef.current, {
+            value: 1,
+            duration: 1.25,
+            ease: "power2.in",
+          });
+        } else {
+          // Retrace journey backwards continuously without any pause, stop, or deceleration at the mouth
+          // Phase 1: Fast rewind along Mars path to wormhole exit (u = 0.0)
+          const rewindDuration = Math.max(
+            0.6,
+            (currentMarsU / MARS_RESTING_U.RESTING_3) * 1.5
+          );
+
+          if (currentMarsU > 0.01) {
+            tl.to(marsTravelRef.current, {
+              value: 0,
+              duration: rewindDuration,
+              ease: "power1.in", // Smooth non-zero velocity into throat
+            });
+          }
+
+          // Phase 2: Plunge backwards into throat void (seamless velocity continuation, no pause at mouth)
+          tl.to(plungeTravelRef.current, {
+            value: 1,
+            duration: 0.85,
+            ease: "power1.out",
           });
         }
-
-        // Phase 2: Plunge into Mars wormhole throat void
-        tl.to(plungeTravelRef.current, {
-          value: 1,
-          duration: 0.8,
-          ease: "power2.in",
-        });
 
         // Phase 3: Concealed switch inside pitch-black core void
         tl.call(() => {
@@ -724,14 +785,14 @@ export function CameraRig({
           ease: "power2.out",
         });
 
-        // Phase 5: Travel backwards along departure path back to Hub Resting
+        // Phase 5: Travel backwards along departure path back to Hub Resting (maintain orientation facing down hallway)
         tl.to(departureTravelRef.current, {
           value: 0,
           duration: hubRestingToNextArea.returnTravelDurationSec,
           ease: hubRestingToNextArea.returnTravelEase,
         });
 
-        // Phase 6: Smoothly re-align view to face Camera Pointer at Hub Resting
+        // Phase 6: Smoothly rotate to face Camera Pointer once arriving at Hub Resting
         tl.to(departureAlignRef.current, {
           value: 0,
           duration: hubRestingToNextArea.returnAlignmentDurationSec,
@@ -831,7 +892,7 @@ export function CameraRig({
         return;
       }
 
-      // 1. MARS ENVIRONMENT NAVIGATION (Resting 1 -> Resting 2 -> Resting 3)
+      // 1. MARS ENVIRONMENT NAVIGATION (Resting 1 -> 2 -> 3 -> Wormhole Approach)
       if (isTeleportedRef.current) {
         const currentIndex = marsRestingIndexRef.current;
 
@@ -845,7 +906,7 @@ export function CameraRig({
             onAtMarsRestingChangeRef.current?.(false, 1);
             gsap.to(marsTravelRef.current, {
               value: MARS_RESTING_U.RESTING_2,
-              duration: 2.8,
+              duration: 2.6,
               ease: "power2.inOut",
               onComplete: () => {
                 isTransitioningRef.current = false;
@@ -862,7 +923,7 @@ export function CameraRig({
             onAtMarsRestingChangeRef.current?.(false, 2);
             gsap.to(marsTravelRef.current, {
               value: MARS_RESTING_U.RESTING_3,
-              duration: 2.4,
+              duration: 2.2,
               ease: "power2.inOut",
               onComplete: () => {
                 isTransitioningRef.current = false;
@@ -871,13 +932,153 @@ export function CameraRig({
               },
             });
             return;
-          } else {
-            // At Resting 3: at end of path
+          } else if (currentIndex === 3) {
+            // Forward 3 -> Mars Wormhole Entry -> Hub Return:
+            // Continuous wrap-around journey along research station perimeter leading directly
+            // into Mars wormhole entrance, through the black singularity void, and returning to Hub Resting.
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 4;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 3);
+
+            const { hubRestingToNextArea } = CAMERA_CONFIG.departureRoutes;
+
+            const tl = gsap.timeline({
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtHubRestingRef.current = true;
+                onAtHubRestingChangeRef.current?.(true);
+                onNavigateSection?.("home");
+              },
+            });
+            timelineRef.current = tl;
+
+            // Phase 1: Wrap-around journey from Resting 3 to Wormhole Entrance (u: 0.4784 -> 1.0)
+            tl.to(marsTravelRef.current, {
+              value: 1.0,
+              duration: 4.2,
+              ease: "power1.in",
+            });
+
+            // Phase 2: Seamless continuation into wormhole mouth and throat void (no stop at entrance)
+            tl.to(plungeTravelRef.current, {
+              value: 1,
+              duration: 1.25,
+              ease: "power2.in",
+            });
+
+            // Phase 3: Concealed switch inside pitch-black core void
+            tl.call(() => {
+              isTeleportedRef.current = false;
+              marsRestingIndexRef.current = 1;
+              marsTravelRef.current.value = 0;
+              isAtMarsRestingRef.current = false;
+              onTeleportToHubRef.current?.();
+              progressRef.current = 1.0;
+              departureTravelRef.current.value = 1.0;
+              departureAlignRef.current.value = 1.0;
+            });
+
+            // Phase 4: Emerge backwards out of Hub wormhole mouth into departure hallway
+            tl.to(plungeTravelRef.current, {
+              value: 0,
+              duration: 0.8,
+              ease: "power2.out",
+            });
+
+            // Phase 5: Travel backwards down departure hallway to Hub Resting (maintain orientation facing hallway)
+            tl.to(departureTravelRef.current, {
+              value: 0,
+              duration: hubRestingToNextArea.returnTravelDurationSec,
+              ease: hubRestingToNextArea.returnTravelEase,
+            });
+
+            // Phase 6: Smoothly rotate to face Camera Pointer once arriving at Hub Resting
+            tl.to(departureAlignRef.current, {
+              value: 0,
+              duration: hubRestingToNextArea.returnAlignmentDurationSec,
+              ease: hubRestingToNextArea.returnAlignmentEase,
+            });
+            return;
+          } else if (currentIndex === 4) {
+            // At Wormhole Approach: Continue into wormhole entrance and enter the black core transition sequence
+            isTransitioningRef.current = true;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 4);
+
+            const { hubRestingToNextArea } = CAMERA_CONFIG.departureRoutes;
+
+            const tl = gsap.timeline({
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtHubRestingRef.current = true;
+                onAtHubRestingChangeRef.current?.(true);
+                onNavigateSection?.("home");
+              },
+            });
+            timelineRef.current = tl;
+
+            // Plunge forward from wormhole entrance (u = 1.0) into the singularity throat
+            tl.to(plungeTravelRef.current, {
+              value: 1,
+              duration: 1.25,
+              ease: "power2.in",
+            });
+
+            // Concealed teleportation inside the pitch-black singularity core
+            tl.call(() => {
+              isTeleportedRef.current = false;
+              marsRestingIndexRef.current = 1;
+              marsTravelRef.current.value = 0;
+              isAtMarsRestingRef.current = false;
+              onTeleportToHubRef.current?.();
+              progressRef.current = 1.0;
+              departureTravelRef.current.value = 1.0;
+              departureAlignRef.current.value = 1.0;
+            });
+
+            // Emerge backwards out of Hub wormhole into departure hallway
+            tl.to(plungeTravelRef.current, {
+              value: 0,
+              duration: 0.8,
+              ease: "power2.out",
+            });
+
+            // Retrace hallway back to Hub Resting (maintain orientation facing hallway)
+            tl.to(departureTravelRef.current, {
+              value: 0,
+              duration: hubRestingToNextArea.returnTravelDurationSec,
+              ease: hubRestingToNextArea.returnTravelEase,
+            });
+
+            // Smoothly rotate to face Camera Pointer once arriving at Hub Resting
+            tl.to(departureAlignRef.current, {
+              value: 0,
+              duration: hubRestingToNextArea.returnAlignmentDurationSec,
+              ease: hubRestingToNextArea.returnAlignmentEase,
+            });
             return;
           }
         } else if (e.deltaY < -15) {
           // Scroll UP: Reverse navigation (Fast cinematic rewind, camera does NOT turn 180 degrees)
-          if (currentIndex === 3) {
+          if (currentIndex === 4) {
+            // Reverse 4 -> 3
+            isTransitioningRef.current = true;
+            marsRestingIndexRef.current = 3;
+            isAtMarsRestingRef.current = false;
+            onAtMarsRestingChangeRef.current?.(false, 4);
+            gsap.to(marsTravelRef.current, {
+              value: MARS_RESTING_U.RESTING_3,
+              duration: 1.5, // Significantly faster rewind
+              ease: "power2.inOut",
+              onComplete: () => {
+                isTransitioningRef.current = false;
+                isAtMarsRestingRef.current = true;
+                onAtMarsRestingChangeRef.current?.(true, 3);
+              },
+            });
+            return;
+          } else if (currentIndex === 3) {
             // Reverse 3 -> 2
             isTransitioningRef.current = true;
             marsRestingIndexRef.current = 2;
@@ -902,7 +1103,7 @@ export function CameraRig({
             onAtMarsRestingChangeRef.current?.(false, 2);
             gsap.to(marsTravelRef.current, {
               value: MARS_RESTING_U.RESTING_1,
-              duration: 1.3, // Significantly faster rewind
+              duration: 1.2, // Significantly faster rewind
               ease: "power2.inOut",
               onComplete: () => {
                 isTransitioningRef.current = false;
@@ -1148,19 +1349,38 @@ export function CameraRig({
 
     if (isTeleported) {
       if (plungeTravel > 0.0001) {
-        // Plunging from Mars wormhole exit into singularity throat void during return to Hub
-        const marsExitPt = marsCurve.getPointAt(0);
-        const marsTangent = marsCurve.getTangentAt(0).normalize();
-        const marsThroatPt = marsExitPt.clone().addScaledVector(marsTangent, -20);
-        currentPos = new THREE.Vector3().lerpVectors(
-          marsExitPt,
-          marsThroatPt,
-          plungeTravel
-        );
-        forwardDir = marsTangent.clone().negate();
-        baseTarget = marsThroatPt.clone().addScaledVector(marsTangent, -10);
+        const marsMouthPt = new THREE.Vector3(-535.702, 169.187, -21.004);
+        const marsTunnelDir = new THREE.Vector3(
+          0.99086,
+          0.02727,
+          -0.13211
+        ).normalize();
+        const marsThroatPt = marsMouthPt
+          .clone()
+          .addScaledVector(marsTunnelDir, 22.022);
+
+        if (marsTravel >= 0.9) {
+          // Plunging forward into Mars wormhole throat from wormhole entrance (u = 1.0)
+          currentPos = new THREE.Vector3().lerpVectors(
+            marsMouthPt,
+            marsThroatPt,
+            plungeTravel
+          );
+          forwardDir = marsTunnelDir.clone();
+          baseTarget = marsThroatPt.clone().addScaledVector(marsTunnelDir, 10);
+        } else {
+          // Plunging backwards into Mars wormhole exit throat during Return to Hub (u = 0.0)
+          currentPos = new THREE.Vector3().lerpVectors(
+            marsMouthPt,
+            marsThroatPt,
+            plungeTravel
+          );
+          // Strictly maintain forward viewing orientation facing out towards Mars scenery:
+          forwardDir = marsTunnelDir.clone().negate();
+          baseTarget = currentPos.clone().addScaledVector(forwardDir, 20);
+        }
       } else {
-        // In Mars environment: traveling along Mars camera path (Resting 1 -> 2 -> 3)
+        // In Mars environment: traveling along Mars camera path (Resting 1 -> 2 -> 3 -> Wormhole Approach)
         currentPos = marsCurve.getPointAt(marsTravel);
         forwardDir = marsCurve.getTangentAt(marsTravel).normalize();
 
@@ -1187,7 +1407,12 @@ export function CameraRig({
       forwardDir = depTangent;
       const depLookAheadT = Math.min(1.0, depTravel + 0.035);
       const depAheadPt = departureCurve.getPointAt(depLookAheadT);
-      baseTarget = depAheadPt.addScaledVector(depTangent, 12);
+      const hallwayLookTarget = depAheadPt.addScaledVector(depTangent, 12);
+      baseTarget = new THREE.Vector3().lerpVectors(
+        markers.cameraPointer,
+        hallwayLookTarget,
+        depAlign
+      );
     } else if (
       depAlign > 0.0001 ||
       (isAtHubRestingRef.current && progressRef.current >= 0.99)
@@ -1258,6 +1483,18 @@ export function CameraRig({
         targetQuat,
         Math.min(1, CAMERA_CONFIG.orientationDynamics.cameraRotationDamping * delta)
       );
+    }
+
+    // Synchronize event horizon blackout with wormhole plunge depth:
+    // Plunging deeper into singularity throat smoothly ramps to 100% pitch blackness,
+    // concealing environment handoff completely in both forward and reverse directions.
+    if (plungeTravel > 0.001) {
+      const blackout = THREE.MathUtils.smoothstep(plungeTravel, 0.35, 0.95);
+      (eventHorizonPlane.material as THREE.MeshBasicMaterial).opacity = blackout;
+      eventHorizonPlane.visible = blackout > 0.001;
+    } else {
+      (eventHorizonPlane.material as THREE.MeshBasicMaterial).opacity = 0;
+      eventHorizonPlane.visible = false;
     }
   });
 
